@@ -4,7 +4,7 @@ AI-powered voice assistant for VS Web Studio.
 
 ## Current status
 
-Phase 1 – Project Foundation. This repository currently provides the typed Express backend foundation and OpenAI client configuration. Voice sessions and integrations are not implemented yet.
+Phase 2A – The typed Express backend foundation now includes a development-only OpenAI API connectivity check. Voice sessions and integrations are not implemented yet.
 
 ## Architecture roadmap
 
@@ -32,6 +32,18 @@ cp .env.example .env
 On Windows PowerShell, use `Copy-Item .env.example .env` instead.
 
 Never commit `.env` or expose its values to client-side code.
+
+## OpenAI API setup
+
+1. Create `.env` from `.env.example`.
+2. Add your server-side `OPENAI_API_KEY` to `.env`.
+3. Verify API connectivity and authentication:
+
+```bash
+npm run check:openai
+```
+
+The check reads the existing environment configuration and OpenAI client. It does not generate a response or start a Realtime session.
 
 ## Development
 
