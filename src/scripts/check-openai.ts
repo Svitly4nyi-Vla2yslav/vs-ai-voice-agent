@@ -35,7 +35,7 @@ const reportFailure = (error: unknown): void => {
 
   if (error instanceof NotFoundError) {
     console.error(
-      "OpenAI connectivity check failed: OPENAI_REALTIME_MODEL is unavailable or inaccessible.",
+      "OpenAI connectivity check failed: the requested OpenAI API resource was not found.",
     );
     return;
   }

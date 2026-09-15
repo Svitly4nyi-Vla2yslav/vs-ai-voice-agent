@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VS Web Studio Voice Agent</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>VS Web Studio Voice Agent</h1>
+      <p>Lokale Engineering-Testoberfläche für OpenAI Realtime.</p>
+
+      <div class="controls">
+        <button id="start" type="button">Start conversation</button>
+        <button id="end" type="button" disabled>End conversation</button>
+      </div>
+
+      <p id="status" role="status" aria-live="polite">Ready</p>
+      <audio id="remote-audio" autoplay playsinline></audio>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

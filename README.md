@@ -4,7 +4,7 @@ AI-powered voice assistant for VS Web Studio.
 
 ## Current status
 
-Phase 2A – The typed Express backend foundation now includes a development-only OpenAI API connectivity check. Voice sessions and integrations are not implemented yet.
+Phase 2B – The Express backend now serves a minimal browser WebRTC voice test and creates short-lived Realtime client credentials. Tools and external integrations are not implemented yet.
 
 ## Architecture roadmap
 
@@ -52,6 +52,15 @@ npm run dev
 ```
 
 The server starts on the configured `PORT` (default: `3001`). Check it at `GET /health`.
+
+## Browser voice test
+
+1. Start the server with `npm run dev`.
+2. Open `http://localhost:3001` in a WebRTC-capable browser.
+3. Select **Start conversation** and allow microphone access.
+4. Speak in German, then select **End conversation** to close the session.
+
+The permanent OpenAI API key remains on the server. The browser receives only a short-lived Realtime client credential and does not persist it.
 
 ## Type checking
 

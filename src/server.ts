@@ -5,11 +5,14 @@ import express, {
 
 import { env } from "./config/env.js";
 import { healthRouter } from "./routes/health.js";
+import { realtimeRouter } from "./routes/realtime.js";
 
 const app = express();
 
 app.use(express.json());
+app.use(express.static("public"));
 app.use(healthRouter);
+app.use(realtimeRouter);
 
 const notFoundHandler: RequestHandler = (_request, response) => {
   response.status(404).json({ error: "Not found" });
