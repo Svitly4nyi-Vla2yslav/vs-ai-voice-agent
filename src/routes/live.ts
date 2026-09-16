@@ -3,6 +3,7 @@ import { APIError } from "openai";
 import { z } from "zod";
 
 import { voiceLabVoices } from "../agent/types.js";
+import { isSameOriginRequest } from "../http/same-origin.js";
 import { liveAgentConfiguration, openAIClient } from "../services/openai.js";
 
 export const liveRouter = Router();
@@ -15,10 +16,7 @@ const liveSessionRequestSchema = z
   .strict();
 
 liveRouter.post("/api/live/session", async (request, response) => {
-  const origin = request.get("Origin");
-  const host = request.get("Host");
-
-  if (origin && (!host || origin !== `${request.protocol}://${host}`)) {
+  if (!isSameOriginRequest(request)) {
     response.status(403).json({ error: "Unexpected request origin" });
     return;
   }

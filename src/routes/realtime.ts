@@ -3,6 +3,7 @@ import { APIError } from "openai";
 import { z } from "zod";
 
 import { realtimeVoices } from "../config/env.js";
+import { isSameOriginRequest } from "../http/same-origin.js";
 import { openAIClient, voiceAgentConfiguration } from "../services/openai.js";
 
 export const realtimeRouter = Router();
@@ -14,10 +15,7 @@ const voiceSelectionSchema = z
   .strict();
 
 realtimeRouter.post("/api/realtime/client-secret", async (request, response) => {
-  const origin = request.get("Origin");
-  const host = request.get("Host");
-
-  if (origin && (!host || origin !== `${request.protocol}://${host}`)) {
+  if (!isSameOriginRequest(request)) {
     response.status(403).json({ error: "Unexpected request origin" });
     return;
   }

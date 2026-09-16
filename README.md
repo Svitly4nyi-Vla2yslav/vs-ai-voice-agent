@@ -67,6 +67,38 @@ npm run dev
 
 The server starts on the configured `PORT` (default: `3001`). Check it at `GET /health`.
 
+## Netlify deployment
+
+Netlify serves the static Voice Quality Lab directly from `public` and runs the
+shared Express application through `netlify/functions/api.ts`. Rewrites keep the
+browser-facing `/api/*` and `/health` URLs unchanged. The WebRTC audio connection
+continues directly between the browser and OpenAI; the function only creates the
+short-lived session or credential.
+
+Use these Netlify build settings (also declared in `netlify.toml`):
+
+```text
+Build command: npm run build
+Publish directory: public
+Functions directory: netlify/functions
+```
+
+In **Project configuration -> Environment variables**, configure:
+
+```dotenv
+OPENAI_API_KEY=<server-side secret>
+OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini
+OPENAI_REALTIME_VOICE=marin
+OPENAI_LIVE_MODEL=gpt-live-1
+```
+
+`PORT` is only needed by the local Node server. Never add `OPENAI_API_KEY` to
+`netlify.toml`, Git, or any file under `public`.
+
+Normal local development still uses `npm run dev`. To emulate the Netlify
+publish directory, rewrites, and function locally, install the Netlify CLI
+separately and run `netlify dev`; the CLI is not required for `npm run dev`.
+
 ## Voice Quality Lab
 
 1. Start the server with `npm run dev`.
