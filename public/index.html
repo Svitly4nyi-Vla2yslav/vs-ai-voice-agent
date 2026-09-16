@@ -9,14 +9,46 @@
   <body>
     <main>
       <h1>VS Web Studio Voice Agent</h1>
-      <p>Lokale Engineering-Testoberfläche für OpenAI Realtime.</p>
+      <p>Lokales Voice Quality Lab für einen fairen Hörvergleich.</p>
+
+      <div class="settings">
+        <label for="mode">Mode</label>
+        <select id="mode">
+          <option value="live" selected>Live — preferred</option>
+          <option value="realtime">Realtime — fallback</option>
+        </select>
+
+        <span>Provider / model</span>
+        <output id="model" for="mode">OpenAI / gpt-live-1</output>
+
+        <label for="voice">Voice</label>
+        <select id="voice">
+          <option value="shimmer">shimmer</option>
+          <option value="coral">coral</option>
+          <option value="marin" selected>marin</option>
+          <option value="nova" disabled>nova — unavailable in installed SDK</option>
+        </select>
+
+        <label for="output-volume">Output volume</label>
+        <div class="volume-control">
+          <input
+            id="output-volume"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="70"
+          />
+          <output id="output-volume-value" for="output-volume">70%</output>
+        </div>
+      </div>
 
       <div class="controls">
         <button id="start" type="button">Start conversation</button>
         <button id="end" type="button" disabled>End conversation</button>
       </div>
 
-      <p id="status" role="status" aria-live="polite">Ready</p>
+      <p>Status: <strong id="status" role="status" aria-live="polite">Ready</strong></p>
       <audio id="remote-audio" autoplay playsinline></audio>
     </main>
 

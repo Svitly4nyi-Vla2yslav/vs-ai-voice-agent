@@ -1,9 +1,17 @@
 import { Router } from "express";
 import { APIError } from "openai";
+import { z } from "zod";
 
+import { realtimeVoices } from "../config/env.js";
 import { openAIClient, voiceAgentConfiguration } from "../services/openai.js";
 
 export const realtimeRouter = Router();
+
+const voiceSelectionSchema = z
+  .object({
+    voice: z.enum(realtimeVoices).optional(),
+  })
+  .strict();
 
 realtimeRouter.post("/api/realtime/client-secret", async (request, response) => {
   const origin = request.get("Origin");
@@ -13,6 +21,15 @@ realtimeRouter.post("/api/realtime/client-secret", async (request, response) => 
     response.status(403).json({ error: "Unexpected request origin" });
     return;
   }
+
+  const parsedRequest = voiceSelectionSchema.safeParse(request.body ?? {});
+  if (!parsedRequest.success) {
+    response.status(400).json({ error: "Unsupported Realtime voice" });
+    return;
+  }
+
+  const selectedVoice =
+    parsedRequest.data.voice ?? voiceAgentConfiguration.voice;
 
   try {
     const clientSecret = await openAIClient.realtime.clientSecrets.create({
@@ -35,7 +52,7 @@ realtimeRouter.post("/api/realtime/client-secret", async (request, response) => 
             },
           },
           output: {
-            voice: voiceAgentConfiguration.voice,
+            voice: selectedVoice,
           },
         },
       },

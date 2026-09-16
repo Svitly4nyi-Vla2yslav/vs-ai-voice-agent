@@ -2,6 +2,10 @@ import type { realtimeVoices } from "../config/env.js";
 
 export type RealtimeVoice = (typeof realtimeVoices)[number];
 
+export const voiceLabVoices = ["shimmer", "coral", "marin"] as const;
+
+export type VoiceLabVoice = (typeof voiceLabVoices)[number];
+
 export const salesConversationStates = [
   "OPENING",
   "DISCOVERY",
@@ -29,5 +33,10 @@ export type SalesConversationOutcome =
 export interface VoiceAgentConfiguration {
   model: string;
   voice: RealtimeVoice;
+  instructions: string;
+}
+
+export interface LiveAgentConfiguration {
+  model: "gpt-live-1";
   instructions: string;
 }

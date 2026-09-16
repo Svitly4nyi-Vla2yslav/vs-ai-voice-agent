@@ -13,6 +13,34 @@ main {
   margin: 0 auto;
 }
 
+.settings {
+  display: grid;
+  grid-template-columns: minmax(8rem, 10rem) minmax(12rem, 1fr);
+  gap: 0.75rem 1rem;
+  align-items: center;
+  margin: 1.5rem 0;
+}
+
+select {
+  padding: 0.5rem;
+  font: inherit;
+}
+
+.volume-control {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+#output-volume {
+  width: min(18rem, 100%);
+}
+
+#output-volume-value {
+  min-width: 3.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .controls {
   display: flex;
   gap: 0.75rem;
@@ -24,6 +52,15 @@ button {
   font: inherit;
 }
 
-#status {
+#status,
+#model,
+#output-volume-value {
   font-weight: 600;
+}
+
+@media (max-width: 32rem) {
+  .settings {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+  }
 }

@@ -4,18 +4,20 @@ AI-powered voice assistant for VS Web Studio.
 
 ## Current status
 
-Phase 2C – The Express backend serves a browser WebRTC voice test with a configurable Realtime voice, conversation-style guidance, respectful sales objection handling, and development event logging. The browser receives a short-lived Realtime client credential; the permanent OpenAI API key stays on the server.
+Phase 3B – Live Voice Polish. After manual comparison, Vladyslav selected OpenAI Live over the Realtime baseline. The preferred/default test stack is `gpt-live-1` over WebRTC with the built-in `marin` voice. `gpt-realtime-2.1-mini` remains available as a fallback and debugging comparison.
 
-The browser voice MVP was manually verified before the Phase 2C changes. Voice quality, interruption behavior, and the updated conversation policy must be manually retested after these changes.
+Live conversation delivery now has dedicated guidance for warmer vocal energy, human rhythm, natural pauses, restrained conversational markers, and professional German. These subjective improvements and the new playback level still require a manual listening test.
 
 ## Architecture roadmap
 
 1. **Phase 1:** Backend foundation
 2. **Phase 2:** Browser voice MVP using OpenAI Realtime + WebRTC
-3. **Phase 3:** Agent tools / function calling
-4. **Phase 4:** Google Calendar + LeadFlow integration
-5. **Phase 5:** Twilio / SIP telephone sandbox
-6. **Phase 6:** Human handoff and controlled consented callbacks
+3. **Phase 3A:** Voice Quality Lab with Realtime and Live WebRTC comparison
+4. **Phase 3B:** Live voice polish
+5. **Phase 3C:** Agent tools / function calling
+6. **Phase 4:** Google Calendar + LeadFlow integration
+7. **Phase 5:** Twilio / SIP telephone sandbox
+8. **Phase 6:** Human handoff and controlled consented callbacks
 
 ## Installation
 
@@ -39,10 +41,11 @@ The Realtime settings are server-side environment variables:
 
 ```dotenv
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini
-OPENAI_REALTIME_VOICE=shimmer
+OPENAI_REALTIME_VOICE=marin
+OPENAI_LIVE_MODEL=gpt-live-1
 ```
 
-`OPENAI_REALTIME_VOICE` defaults to `shimmer`, a softer voice selected for Phase 2C testing. The installed SDK also supports options including `coral` and `marin`. Environment validation rejects unsupported configured values. `nova` is not included because the installed SDK does not list it for the current Realtime client-secret API.
+The UI defaults to Live with `marin`. `OPENAI_REALTIME_VOICE` is the server-side fallback for direct Realtime requests and also defaults to `marin`. The lab still permits `shimmer`, `coral`, and `marin` for comparisons. Every submitted voice is validated against a server-side allowlist. `nova` remains unavailable because the installed SDK does not list it for either current API.
 
 ## OpenAI API setup
 
@@ -64,24 +67,31 @@ npm run dev
 
 The server starts on the configured `PORT` (default: `3001`). Check it at `GET /health`.
 
-## Browser voice test
+## Voice Quality Lab
 
 1. Start the server with `npm run dev`.
 2. Open `http://localhost:3001` in a WebRTC-capable browser.
-3. Select **Start conversation** and allow microphone access.
-4. Speak in German and observe the simple status display: **Connecting**, **Connected**, **Listening**, or **AI speaking**.
-5. Select **End conversation** to close the session.
+3. Confirm the default **Live — preferred**, `gpt-live-1`, and `marin` settings. Realtime remains selectable as a fallback.
+4. Set **Output volume**. It defaults to `70%`; `0%` mutes remote playback. The selected percentage is stored locally between reloads when `localStorage` is available.
+5. Select **Start conversation** and allow microphone access.
+6. Run the German script below.
+7. Select **End conversation** when finished.
 
-The permanent OpenAI API key remains on the server. The browser receives only a short-lived Realtime client credential and does not persist it.
+The stable Realtime path creates a short-lived credential on the backend and exchanges SDP directly with the Realtime calls endpoint. The experimental Live path sends the browser's SDP offer to the local backend, which creates a `gpt-live-1` session through `POST /v1/live/sessions` and returns only the SDP answer. The permanent OpenAI API key remains on the backend in both cases.
 
-For development, the browser console logs selected Realtime lifecycle events such as session creation, detected speech, response start/completion, interruptions, and errors. Logs contain event types and limited status/error metadata only; credentials and full event payloads are not logged.
+The visible UI reports provider/model, voice, output volume, and lifecycle status. Playback uses only the remote `<audio>` element and its standard `volume` property. No parallel Web Audio playback or compressor is active, so audio is not duplicated. Browser console diagnostics contain only allowlisted lifecycle event names, final Live usage seconds, and limited status/error codes. Permanent keys, ephemeral credentials, SDP payloads, transcripts, and full protocol events are not logged.
 
 ## Voice and conversation policy
 
-The Phase 2C instructions ask the assistant to:
+The preserved sales instructions and Live-specific delivery guidance ask the assistant to:
 
 - identify itself as the VS Web Studio AI assistant at the start of a real customer conversation;
-- default to warm, calm, concise, natural German at a medium speaking speed;
+- use exceptionally warm, gentle, grounded vocal energy without shouting, sharp emphasis, or theatrical enthusiasm;
+- vary sentence length and rhythm, use brief human pauses, and avoid long sequences of perfectly formed sentences;
+- use subtle markers such as „Mhm“, „Okay“ or „Verstehe“ only when natural and never in every response;
+- remain professional, use polite German and address customers as „Sie“ by default;
+- understand non-native German by prioritizing intended meaning over grammar and never correcting it unless asked;
+- ask one short confirmation question when an important detail is unclear and explicitly confirm phone numbers, email addresses, dates, times, and prices;
 - pause naturally, stop speaking when interrupted, and let the customer respond;
 - distinguish soft objections from clear hard stops;
 - move a qualified or consented sales conversation toward one useful next step without pressure;
@@ -90,28 +100,37 @@ The Phase 2C instructions ask the assistant to:
 
 The conceptual conversation states are `OPENING`, `DISCOVERY`, `NEED_IDENTIFIED`, `OBJECTION`, `NEXT_STEP`, and `CLOSING`. Prepared outcomes are `BOOK_MEETING`, `CALLBACK_REQUESTED`, `SEND_INFORMATION`, `HUMAN_HANDOFF`, `NOT_INTERESTED`, and `DO_NOT_CONTACT`. These values are preparation for future function calling only; they are not persisted or executed.
 
-## Manual German test scenarios
+## Manual Live voice test
 
-Run each scenario in a fresh or logically appropriate conversation and confirm the expected behavior:
+Use the same microphone, browser, room, laptop volume, and application output-volume setting. Start a new Live/`marin` conversation and say:
 
-1. Say: **„Guten Tag. Was machen Sie eigentlich?“**
-   Expected: AI disclosure and a short explanation of VS Web Studio, without invented company details.
-2. Say: **„Ich habe jetzt keine Zeit.“**
-   Expected: the assistant acknowledges this and asks for a suitable callback time instead of immediately giving up.
-3. Say: **„Wir haben schon eine Webseite.“**
-   Expected: one short discovery question about a relevant possible improvement.
-4. Say: **„Schicken Sie mir Informationen.“**
-   Expected: the assistant accepts this as a next step but does not claim that an email was sent.
-5. Say: **„Nein danke, kein Interesse. Bitte nicht mehr anrufen.“**
-   Expected: the assistant immediately stops selling, confirms the request politely, and closes.
+1. **„Guten Tag. Wer bist du und was machst du?“**
+2. **„Ich habe eigentlich schon eine Webseite.“**
+3. **„Hm ... ich weiß nicht. Im Moment habe ich nicht so viel Zeit.“**
+4. **„Was würden Sie mir denn konkret empfehlen?“**
+5. **„Ich habe Webseite, aber ich bin nicht sicher, was dort muss besser machen.“**
 6. Interrupt the assistant while it is speaking.
-   Expected: it stops promptly and listens to the customer.
 
-Also listen for a warm, soft delivery, natural pauses, medium speed, short sentences, and concise answers. Voice quality and microphone/interruption behavior require a human listening test and cannot be established by type checking or API connectivity checks.
+Evaluate warmth, naturalness, pauses, filler frequency, loudness, harsh vocal peaks, interruption behavior, and understanding of the intentionally imperfect fifth sentence. Repeat once at `70%` and, if peaks remain harsh, at a lower output level. Voice character and audio quality cannot be established by compilation or API checks.
+
+## Development pricing note
+
+As verified on September 16, 2026, OpenAI documents `gpt-live-1` voice sessions at **$0.05 per minute, billed per second**. Backend delegated model and tool usage is billed separately. This is documentation only, is not hardcoded into application logic, and is subject to provider changes. Check the current [official GPT-Live 1 model page](https://developers.openai.com/api/docs/models/gpt-live-1) before budgeting.
+
+## Future operator-controlled calling
+
+Outbound calling is not implemented. The intended future workflow is operator controlled:
+
+1. Vladyslav manually chooses one specific lead or customer.
+2. Vladyslav explicitly starts one AI-assisted call.
+3. The command includes the phone number, company/contact, call objective, relevant context, allowed contact mode, and optional notes.
+4. The system verifies the required permission or consent and never autonomously starts bulk outbound calls.
+
+Future tools may include `scheduleMeeting`, `createCallback`, `saveCallSummary`, `draftEmail`, `sendApprovedEmail`, `updateLead`, and `transferToHuman`. None of these tools exists in Phase 3B.
 
 ## Current limitations
 
-There are no working CRM, database, Google Calendar, email, callback, human-handoff, Twilio, SIP, or telephone tools. No sales outcome is persisted. The application must not describe any of those actions as completed.
+There are no working CRM, database, Google Calendar, Gmail, email, LeadFlow, Firebase, callback, human-handoff, Twilio, SIP, outbound calling, or other telephone tools. No sales outcome is persisted. The application must not describe any of those actions as completed. Playback uses simple volume attenuation rather than a compressor; final warmth, peak harshness, microphone behavior, and interruption quality require Vladyslav's listening test.
 
 ## Type checking
 

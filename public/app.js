@@ -1,11 +1,28 @@
+import { startLiveConversation } from "/live-client.js";
+
 const startButton = document.querySelector("#start");
 const endButton = document.querySelector("#end");
 const statusElement = document.querySelector("#status");
 const remoteAudio = document.querySelector("#remote-audio");
+const modeSelect = document.querySelector("#mode");
+const voiceSelect = document.querySelector("#voice");
+const modelElement = document.querySelector("#model");
+const outputVolumeSlider = document.querySelector("#output-volume");
+const outputVolumeValue = document.querySelector("#output-volume-value");
+
+const DEFAULT_OUTPUT_VOLUME = 70;
+const OUTPUT_VOLUME_STORAGE_KEY = "vs-voice-agent-output-volume";
+
+const modeModels = {
+  realtime: "OpenAI / gpt-realtime-2.1-mini",
+  live: "OpenAI / gpt-live-1",
+};
 
 let peerConnection;
 let microphoneStream;
 let eventChannel;
+let activeLiveConversation;
+let connectionAbortController;
 let connectionAttempt = 0;
 
 const loggedRealtimeEvents = new Set([
@@ -23,6 +40,42 @@ const loggedRealtimeEvents = new Set([
 
 const setStatus = (message) => {
   statusElement.textContent = message;
+};
+
+const readStoredOutputVolume = () => {
+  try {
+    const storedValue = Number.parseInt(
+      localStorage.getItem(OUTPUT_VOLUME_STORAGE_KEY) ?? "",
+      10,
+    );
+    return Number.isFinite(storedValue)
+      ? Math.min(100, Math.max(0, storedValue))
+      : DEFAULT_OUTPUT_VOLUME;
+  } catch {
+    return DEFAULT_OUTPUT_VOLUME;
+  }
+};
+
+const applyOutputVolume = (percentage, persist = false) => {
+  const normalizedPercentage = Math.min(
+    100,
+    Math.max(0, Math.round(percentage)),
+  );
+
+  outputVolumeSlider.value = String(normalizedPercentage);
+  outputVolumeValue.textContent = `${normalizedPercentage}%`;
+  remoteAudio.volume = normalizedPercentage / 100;
+
+  if (persist) {
+    try {
+      localStorage.setItem(
+        OUTPUT_VOLUME_STORAGE_KEY,
+        String(normalizedPercentage),
+      );
+    } catch {
+      // Volume still works when browser storage is unavailable.
+    }
+  }
 };
 
 const logRealtimeEvent = (serverEvent) => {
@@ -72,24 +125,34 @@ const updateStatusFromRealtimeEvent = (serverEvent) => {
 
 const cleanup = () => {
   connectionAttempt += 1;
+  connectionAbortController?.abort();
+  activeLiveConversation?.close();
   microphoneStream?.getTracks().forEach((track) => track.stop());
   eventChannel?.close();
   peerConnection?.close();
 
+  connectionAbortController = undefined;
+  activeLiveConversation = undefined;
   microphoneStream = undefined;
   eventChannel = undefined;
   peerConnection = undefined;
   remoteAudio.srcObject = null;
+  modeSelect.disabled = false;
+  voiceSelect.disabled = false;
   startButton.disabled = false;
   endButton.disabled = true;
 };
 
-const requestClientSecret = async () => {
+const requestClientSecret = async (voice) => {
   let response;
   try {
     response = await fetch("/api/realtime/client-secret", {
       method: "POST",
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ voice }),
     });
   } catch {
     throw new Error("backend-unavailable");
@@ -115,11 +178,34 @@ const startConversation = async () => {
 
   startButton.disabled = true;
   endButton.disabled = false;
+  modeSelect.disabled = true;
+  voiceSelect.disabled = true;
   const currentAttempt = ++connectionAttempt;
+  const selectedMode = modeSelect.value;
+  const selectedVoice = voiceSelect.value;
 
   try {
     setStatus("Connecting");
-    const clientSecret = await requestClientSecret();
+    if (selectedMode === "live") {
+      const abortController = new AbortController();
+      connectionAbortController = abortController;
+      const liveConversation = await startLiveConversation({
+        voice: selectedVoice,
+        remoteAudio,
+        setStatus,
+        signal: abortController.signal,
+      });
+
+      if (currentAttempt !== connectionAttempt) {
+        liveConversation.close();
+        return;
+      }
+
+      activeLiveConversation = liveConversation;
+      return;
+    }
+
+    const clientSecret = await requestClientSecret(selectedVoice);
     if (currentAttempt !== connectionAttempt) return;
 
     try {
@@ -210,6 +296,7 @@ const startConversation = async () => {
       sdp: await realtimeResponse.text(),
     });
   } catch (error) {
+    if (currentAttempt !== connectionAttempt) return;
     cleanup();
 
     if (error instanceof Error && error.message === "microphone-denied") {
@@ -230,6 +317,11 @@ const startConversation = async () => {
         error.message === "invalid-client-secret-response")
     ) {
       setStatus("The backend could not create a Realtime credential.");
+    } else if (
+      error instanceof Error &&
+      error.message === "live-session-request-failed"
+    ) {
+      setStatus("The backend could not create a Live session.");
     } else {
       setStatus("The WebRTC connection could not be established.");
     }
@@ -242,7 +334,18 @@ startButton.addEventListener("click", () => {
 
 endButton.addEventListener("click", () => {
   cleanup();
-  setStatus("Conversation ended.");
+  setStatus("Conversation ended");
 });
+
+modeSelect.addEventListener("change", () => {
+  modelElement.textContent = modeModels[modeSelect.value];
+});
+
+outputVolumeSlider.addEventListener("input", () => {
+  applyOutputVolume(outputVolumeSlider.valueAsNumber, true);
+});
+
+modelElement.textContent = modeModels[modeSelect.value];
+applyOutputVolume(readStoredOutputVolume());
 
 window.addEventListener("beforeunload", cleanup);
