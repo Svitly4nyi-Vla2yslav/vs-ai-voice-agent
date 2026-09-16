@@ -35,7 +35,7 @@ realtimeRouter.post("/api/realtime/client-secret", async (request, response) => 
             },
           },
           output: {
-            voice: "marin",
+            voice: voiceAgentConfiguration.voice,
           },
         },
       },

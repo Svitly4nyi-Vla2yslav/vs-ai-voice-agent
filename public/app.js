@@ -8,8 +8,66 @@ let microphoneStream;
 let eventChannel;
 let connectionAttempt = 0;
 
+const loggedRealtimeEvents = new Set([
+  "session.created",
+  "session.updated",
+  "input_audio_buffer.speech_started",
+  "input_audio_buffer.speech_stopped",
+  "response.created",
+  "response.done",
+  "response.cancelled",
+  "conversation.item.truncated",
+  "output_audio_buffer.cleared",
+  "error",
+]);
+
 const setStatus = (message) => {
   statusElement.textContent = message;
+};
+
+const logRealtimeEvent = (serverEvent) => {
+  if (!loggedRealtimeEvents.has(serverEvent.type)) return;
+
+  const safeDetails = { type: serverEvent.type };
+
+  if (serverEvent.type === "response.done") {
+    safeDetails.responseStatus = serverEvent.response?.status;
+  } else if (serverEvent.type === "error") {
+    safeDetails.errorCode = serverEvent.error?.code;
+    safeDetails.errorType = serverEvent.error?.type;
+  }
+
+  const logMethod = serverEvent.type === "error" ? "error" : "debug";
+  console[logMethod]("[OpenAI Realtime]", safeDetails);
+};
+
+const updateStatusFromRealtimeEvent = (serverEvent) => {
+  switch (serverEvent.type) {
+    case "session.created":
+    case "session.updated":
+      setStatus("Connected");
+      break;
+    case "input_audio_buffer.speech_started":
+      setStatus("Listening");
+      break;
+    case "input_audio_buffer.speech_stopped":
+      setStatus("Connected");
+      break;
+    case "response.created":
+      setStatus("AI speaking");
+      break;
+    case "response.done":
+      setStatus("Listening");
+      break;
+    case "response.cancelled":
+    case "conversation.item.truncated":
+    case "output_audio_buffer.cleared":
+      setStatus("Listening");
+      break;
+    case "error":
+      setStatus("The Realtime session reported an error.");
+      break;
+  }
 };
 
 const cleanup = () => {
@@ -60,11 +118,10 @@ const startConversation = async () => {
   const currentAttempt = ++connectionAttempt;
 
   try {
-    setStatus("Requesting a short-lived Realtime credential…");
+    setStatus("Connecting");
     const clientSecret = await requestClientSecret();
     if (currentAttempt !== connectionAttempt) return;
 
-    setStatus("Waiting for microphone permission…");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -97,7 +154,7 @@ const startConversation = async () => {
       if (peerConnection !== connection) return;
 
       if (connection.connectionState === "connected") {
-        setStatus("Connected — speak in German.");
+        setStatus("Connected");
       } else if (
         connection.connectionState === "failed" ||
         connection.connectionState === "disconnected"
@@ -115,21 +172,19 @@ const startConversation = async () => {
     eventChannel = channel;
     channel.addEventListener("open", () => {
       if (eventChannel === channel) {
-        setStatus("Connected — speak in German.");
+        setStatus("Listening");
       }
     });
     channel.addEventListener("message", (event) => {
       try {
         const serverEvent = JSON.parse(event.data);
-        if (serverEvent.type === "error") {
-          setStatus("The Realtime session reported an error.");
-        }
+        logRealtimeEvent(serverEvent);
+        updateStatusFromRealtimeEvent(serverEvent);
       } catch {
         setStatus("Received an unreadable Realtime event.");
       }
     });
 
-    setStatus("Connecting to OpenAI Realtime…");
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
 

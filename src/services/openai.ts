@@ -10,5 +10,6 @@ export const openAIClient = new OpenAI({
 
 export const voiceAgentConfiguration: VoiceAgentConfiguration = {
   model: env.OPENAI_REALTIME_MODEL,
+  voice: env.OPENAI_REALTIME_VOICE,
   instructions: VS_WEB_STUDIO_AGENT_INSTRUCTIONS,
 };
