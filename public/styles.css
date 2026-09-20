@@ -54,8 +54,13 @@ button {
 
 #status,
 #model,
-#output-volume-value {
+#output-volume-value,
+#tool-activity {
   font-weight: 600;
+}
+
+.tool-activity {
+  margin-top: 0.5rem;
 }
 
 @media (max-width: 32rem) {

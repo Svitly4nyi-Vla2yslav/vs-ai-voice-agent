@@ -4,176 +4,110 @@ AI-powered voice assistant for VS Web Studio.
 
 ## Current status
 
-Phase 3B – Live Voice Polish. After manual comparison, Vladyslav selected OpenAI Live over the Realtime baseline. The preferred/default test stack is `gpt-live-1` over WebRTC with the built-in `marin` voice. `gpt-realtime-2.1-mini` remains available as a fallback and debugging comparison.
+**Phase 4A – Agent Tool Calling Foundation.** `gpt-live-1` remains the preferred conversational voice model over WebRTC, using `marin` by default. `gpt-realtime-2.1-mini` remains available as the fallback and debugging comparison.
 
-Live conversation delivery now has dedicated guidance for warmer vocal energy, human rhythm, natural pauses, restrained conversational markers, and professional German. These subjective improvements and the new playback level still require a manual listening test.
+Live uses a server-owned Responses delegation with `gpt-5.4-mini` as the default backend model. The only registered Phase 4A business tool is `prepareNextStep`. It validates and normalizes a requested meeting, callback, information request, or human handoff. It does not perform or persist the action. Every result has `externalActionPerformed: false`.
 
-## Architecture roadmap
+There is no Calendar, Gmail, email sending, Firebase, LeadFlow, CRM, callback, human-transfer, Twilio, SIP, or telephone integration.
 
-1. **Phase 1:** Backend foundation
-2. **Phase 2:** Browser voice MVP using OpenAI Realtime + WebRTC
-3. **Phase 3A:** Voice Quality Lab with Realtime and Live WebRTC comparison
-4. **Phase 3B:** Live voice polish
-5. **Phase 3C:** Agent tools / function calling
-6. **Phase 4:** Google Calendar + LeadFlow integration
-7. **Phase 5:** Twilio / SIP telephone sandbox
-8. **Phase 6:** Human handoff and controlled consented callbacks
+## Architecture
 
-## Installation
+The browser sends its SDP offer to `POST /api/live/session`. The shared Express backend creates a `gpt-live-1` WebRTC session and configures `delegation.type: "responses"` with the backend model, backend-only prompt, strict tool definition, `tool_choice: "auto"`, and `parallel_tool_calls: false`.
+
+When the delegated Responses model requests `prepareNextStep`, Live exposes the completed function-call item as a nested `response.event` on the WebRTC data channel. The browser relays only the tool name and arguments to `POST /api/tools/execute`. The server checks same-origin policy, accepts only a registered name, validates arguments with Zod, executes the local implementation, and returns a JSON-safe result. The browser then sends the authoritative result to Live with `response.item.create` using a `function_call_output` item, followed by `response.create`.
+
+This relay works with both local Express and Netlify Functions. It does not require a permanent application-server WebSocket. The browser contains no business execution logic or credentials and cannot select arbitrary server functions.
+
+## Tool contract
+
+`prepareNextStep` supports exactly these actions:
+
+- `BOOK_MEETING`
+- `CALLBACK_REQUESTED`
+- `SEND_INFORMATION`
+- `HUMAN_HANDOFF`
+
+Accepted fields are `type`, `contactName`, `companyName`, `date`, `time`, `timeWindow`, `email`, `phone`, `reason`, and `notes`. Extra fields, invalid action values, malformed dates/times, and invalid email addresses are rejected. Empty optional strings normalize to missing values.
+
+Meetings and callbacks require a date plus either a time or time window. Information requests require an email address. Missing critical values produce `needs_clarification`; valid requests produce `prepared_only`. Neither result represents a completed external action.
+
+## Installation and environment
 
 ```bash
 npm install
 ```
 
-## Environment setup
-
-Copy `.env.example` to `.env`, then provide your server-side OpenAI API key.
-
-```bash
-cp .env.example .env
-```
-
-On Windows PowerShell, use `Copy-Item .env.example .env` instead.
-
-Never commit `.env` or expose its values to client-side code.
-
-The Realtime settings are server-side environment variables:
-
-```dotenv
-OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini
-OPENAI_REALTIME_VOICE=marin
-OPENAI_LIVE_MODEL=gpt-live-1
-```
-
-The UI defaults to Live with `marin`. `OPENAI_REALTIME_VOICE` is the server-side fallback for direct Realtime requests and also defaults to `marin`. The lab still permits `shimmer`, `coral`, and `marin` for comparisons. Every submitted voice is validated against a server-side allowlist. `nova` remains unavailable because the installed SDK does not list it for either current API.
-
-## OpenAI API setup
-
-1. Create `.env` from `.env.example`.
-2. Add your server-side `OPENAI_API_KEY` to `.env`.
-3. Verify API connectivity and authentication:
-
-```bash
-npm run check:openai
-```
-
-The check reads the existing environment configuration and OpenAI client. It does not generate a response or start a Realtime session.
-
-## Development
-
-```bash
-npm run dev
-```
-
-The server starts on the configured `PORT` (default: `3001`). Check it at `GET /health`.
-
-## Netlify deployment
-
-Netlify serves the static Voice Quality Lab directly from `public` and runs the
-shared Express application through `netlify/functions/api.ts`. Rewrites keep the
-browser-facing `/api/*` and `/health` URLs unchanged. The WebRTC audio connection
-continues directly between the browser and OpenAI; the function only creates the
-short-lived session or credential.
-
-Use these Netlify build settings (also declared in `netlify.toml`):
-
-```text
-Build command: npm run build
-Publish directory: public
-Functions directory: netlify/functions
-```
-
-In **Project configuration -> Environment variables**, configure:
+Copy `.env.example` to `.env`, then add the server-side API key. Do not commit `.env` or expose its values in client code.
 
 ```dotenv
 OPENAI_API_KEY=<server-side secret>
 OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini
 OPENAI_REALTIME_VOICE=marin
 OPENAI_LIVE_MODEL=gpt-live-1
+OPENAI_AGENT_MODEL=gpt-5.4-mini
+PORT=3001
 ```
 
-`PORT` is only needed by the local Node server. Never add `OPENAI_API_KEY` to
-`netlify.toml`, Git, or any file under `public`.
+`OPENAI_AGENT_MODEL` controls only the delegated Responses backend. It is not exposed to the browser.
 
-Normal local development still uses `npm run dev`. To emulate the Netlify
-publish directory, rewrites, and function locally, install the Netlify CLI
-separately and run `netlify dev`; the CLI is not required for `npm run dev`.
+## Development and checks
 
-## Voice Quality Lab
+```bash
+npm run dev
+npm run check:tools
+npm run typecheck
+npm run build
+npm run check:openai
+```
 
-1. Start the server with `npm run dev`.
-2. Open `http://localhost:3001` in a WebRTC-capable browser.
-3. Confirm the default **Live — preferred**, `gpt-live-1`, and `marin` settings. Realtime remains selectable as a fallback.
-4. Set **Output volume**. It defaults to `70%`; `0%` mutes remote playback. The selected percentage is stored locally between reloads when `localStorage` is available.
-5. Select **Start conversation** and allow microphone access.
-6. Run the German script below.
-7. Select **End conversation** when finished.
+The server listens on `PORT` (default `3001`). Verify it at `GET /health`. `check:openai` verifies API authentication without generating a response or starting a voice session. `check:tools` exercises strict validation, missing-data handling, the tool allowlist, and the invariant that no external action is performed.
 
-The stable Realtime path creates a short-lived credential on the backend and exchanges SDP directly with the Realtime calls endpoint. The experimental Live path sends the browser's SDP offer to the local backend, which creates a `gpt-live-1` session through `POST /v1/live/sessions` and returns only the SDP answer. The permanent OpenAI API key remains on the backend in both cases.
+## Netlify deployment
 
-The visible UI reports provider/model, voice, output volume, and lifecycle status. Playback uses only the remote `<audio>` element and its standard `volume` property. No parallel Web Audio playback or compressor is active, so audio is not duplicated. Browser console diagnostics contain only allowlisted lifecycle event names, final Live usage seconds, and limited status/error codes. Permanent keys, ephemeral credentials, SDP payloads, transcripts, and full protocol events are not logged.
+Netlify serves `public` and runs the shared Express application through `netlify/functions/api.ts`. Existing rewrites keep `/api/*` and `/health` stable. Configure these variables in **Project configuration → Environment variables**:
 
-## Voice and conversation policy
+```dotenv
+OPENAI_API_KEY=<server-side secret>
+OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini
+OPENAI_REALTIME_VOICE=marin
+OPENAI_LIVE_MODEL=gpt-live-1
+OPENAI_AGENT_MODEL=gpt-5.4-mini
+```
 
-The preserved sales instructions and Live-specific delivery guidance ask the assistant to:
+`PORT` is needed only for the local server. Never put `OPENAI_API_KEY` in `netlify.toml`, Git, or `public`.
 
-- identify itself as the VS Web Studio AI assistant at the start of a real customer conversation;
-- use exceptionally warm, gentle, grounded vocal energy without shouting, sharp emphasis, or theatrical enthusiasm;
-- vary sentence length and rhythm, use brief human pauses, and avoid long sequences of perfectly formed sentences;
-- use subtle markers such as „Mhm“, „Okay“ or „Verstehe“ only when natural and never in every response;
-- remain professional, use polite German and address customers as „Sie“ by default;
-- understand non-native German by prioritizing intended meaning over grammar and never correcting it unless asked;
-- ask one short confirmation question when an important detail is unclear and explicitly confirm phone numbers, email addresses, dates, times, and prices;
-- pause naturally, stop speaking when interrupted, and let the customer respond;
-- distinguish soft objections from clear hard stops;
-- move a qualified or consented sales conversation toward one useful next step without pressure;
-- never claim that an email, callback, booking, handoff, or CRM update happened without confirmation from a future tool;
-- never conduct unsolicited automated advertising calls.
+## Security controls
 
-The conceptual conversation states are `OPENING`, `DISCOVERY`, `NEED_IDENTIFIED`, `OBJECTION`, `NEXT_STEP`, and `CLOSING`. Prepared outcomes are `BOOK_MEETING`, `CALLBACK_REQUESTED`, `SEND_INFORMATION`, `HUMAN_HANDOFF`, `NOT_INTERESTED`, and `DO_NOT_CONTACT`. These values are preparation for future function calling only; they are not persisted or executed.
+- The permanent OpenAI key and backend model configuration remain server-side.
+- Live data-channel permissions expose only the events required for lifecycle, transcripts, and the delegated tool-result cycle.
+- `/api/tools/execute` uses the existing same-origin check.
+- The dispatcher accepts only `prepareNextStep`; unknown tools return a controlled failure.
+- Zod validates all arguments at runtime and rejects extra fields.
+- Tool and relay errors are sanitized; stack traces and secrets are not returned.
+- Logs include only tool name, status, and action type. Email addresses, phone numbers, arguments, transcripts, credentials, and SDP are not logged.
+- No external action or persistence exists in Phase 4A.
 
-## Manual Live voice test
+## Development UI
 
-Use the same microphone, browser, room, laptop volume, and application output-volume setting. Start a new Live/`marin` conversation and say:
+The Voice Quality Lab defaults to Live/`gpt-live-1` with `marin`; Realtime remains selectable. The **Last tool activity** field shows only `None`, a tool request/completion, `Clarification required`, or `Tool error`. It never displays customer data.
 
-1. **„Guten Tag. Wer bist du und was machst du?“**
-2. **„Ich habe eigentlich schon eine Webseite.“**
-3. **„Hm ... ich weiß nicht. Im Moment habe ich nicht so viel Zeit.“**
-4. **„Was würden Sie mir denn konkret empfehlen?“**
-5. **„Ich habe Webseite, aber ich bin nicht sicher, was dort muss besser machen.“**
-6. Interrupt the assistant while it is speaking.
+## Manual Phase 4A voice tests
 
-Evaluate warmth, naturalness, pauses, filler frequency, loudness, harsh vocal peaks, interruption behavior, and understanding of the intentionally imperfect fifth sentence. Repeat once at `70%` and, if peaks remain harsh, at a lower output level. Voice character and audio quality cannot be established by compilation or API checks.
+These scenarios require Vladyslav to run them in a WebRTC-capable browser. Compilation and API authentication do not validate spoken behavior.
 
-## Development pricing note
+1. **Callback:** Say “Rufen Sie mich bitte am Freitag um 15 Uhr zurück.” Confirm `CALLBACK_REQUESTED`, `externalActionPerformed: false`, and wording that the request was captured/prepared—not scheduled.
+2. **Missing date:** Say “Rufen Sie mich später zurück.” Emma should ask for a useful date/time and must not claim a scheduled callback.
+3. **Information:** Say “Schicken Sie mir bitte Informationen per E-Mail.” Emma should request the email address if unknown, then prepare `SEND_INFORMATION` without claiming an email was sent.
+4. **Meeting:** Say “Freitag um 15 Uhr können wir einen Termin machen.” Confirm `BOOK_MEETING` is prepared and no confirmed booking is claimed.
+5. **Human:** Say “Ich möchte lieber mit Vladyslav sprechen.” Confirm `HUMAN_HANDOFF` is prepared and no transfer is claimed.
+6. **Hard stop:** Say “Nein danke. Bitte rufen Sie mich nicht mehr an.” Emma should close politely, make no `prepareNextStep` sales-action call, preserve the `DO_NOT_CONTACT` conversation policy, and not claim CRM persistence.
 
-As verified on September 16, 2026, OpenAI documents `gpt-live-1` voice sessions at **$0.05 per minute, billed per second**. Backend delegated model and tool usage is billed separately. This is documentation only, is not hardcoded into application logic, and is subject to provider changes. Check the current [official GPT-Live 1 model page](https://developers.openai.com/api/docs/models/gpt-live-1) before budgeting.
-
-## Future operator-controlled calling
-
-Outbound calling is not implemented. The intended future workflow is operator controlled:
-
-1. Vladyslav manually chooses one specific lead or customer.
-2. Vladyslav explicitly starts one AI-assisted call.
-3. The command includes the phone number, company/contact, call objective, relevant context, allowed contact mode, and optional notes.
-4. The system verifies the required permission or consent and never autonomously starts bulk outbound calls.
-
-Future tools may include `scheduleMeeting`, `createCallback`, `saveCallSummary`, `draftEmail`, `sendApprovedEmail`, `updateLead`, and `transferToHuman`. None of these tools exists in Phase 3B.
+Also verify interruption behavior, audio quality, fallback Realtime compilation, and that `GET /health` still responds.
 
 ## Current limitations
 
-There are no working CRM, database, Google Calendar, Gmail, email, LeadFlow, Firebase, callback, human-handoff, Twilio, SIP, outbound calling, or other telephone tools. No sales outcome is persisted. The application must not describe any of those actions as completed. Playback uses simple volume attenuation rather than a compressor; final warmth, peak harshness, microphone behavior, and interruption quality require Vladyslav's listening test.
+The backend model may normalize a relative date such as “Freitag” from session context, but ambiguous critical values must trigger a clarification rather than a guess. Phase 4A does not check real availability or create records. A `prepared_only` result exists only in the active conversation and disappears when the session ends.
 
-## Type checking
+## Next phase
 
-```bash
-npm run typecheck
-```
-
-## Build
-
-```bash
-npm run build
-```
-
-Run the compiled server with `npm start`.
+Recommended Phase 4B: implement one real, explicitly confirmed Calendar availability-and-booking workflow with OAuth, timezone-aware validation, idempotency, and a truthful success/failure contract, while retaining `prepareNextStep` as the non-performing preparation boundary until the real tool confirms the external action.

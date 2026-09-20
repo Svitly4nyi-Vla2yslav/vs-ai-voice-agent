@@ -23,6 +23,11 @@ const environmentSchema = z.object({
     .default("gpt-realtime-2.1-mini"),
   OPENAI_REALTIME_VOICE: z.enum(realtimeVoices).default("marin"),
   OPENAI_LIVE_MODEL: z.literal("gpt-live-1").default("gpt-live-1"),
+  OPENAI_AGENT_MODEL: z
+    .string()
+    .trim()
+    .min(1, "OPENAI_AGENT_MODEL is required")
+    .default("gpt-5.4-mini"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3001),
 });
 

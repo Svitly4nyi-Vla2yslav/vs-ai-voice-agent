@@ -39,4 +39,6 @@ export interface VoiceAgentConfiguration {
 export interface LiveAgentConfiguration {
   model: "gpt-live-1";
   instructions: string;
+  backendModel: string;
+  backendInstructions: string;
 }

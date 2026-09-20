@@ -5,6 +5,7 @@ import { z } from "zod";
 import { voiceLabVoices } from "../agent/types.js";
 import { isSameOriginRequest } from "../http/same-origin.js";
 import { liveAgentConfiguration, openAIClient } from "../services/openai.js";
+import { agentTools } from "../tools/index.js";
 
 export const liveRouter = Router();
 
@@ -33,6 +34,18 @@ liveRouter.post("/api/live/session", async (request, response) => {
         model: liveAgentConfiguration.model,
         instructions: liveAgentConfiguration.instructions,
         store: false,
+        delegation: {
+          type: "responses",
+          responses: {
+            model: liveAgentConfiguration.backendModel,
+            instructions: liveAgentConfiguration.backendInstructions,
+            tools: agentTools,
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+            reasoning: { effort: "low" },
+            text: { verbosity: "low" },
+          },
+        },
         audio: {
           output: {
             voice: parsedRequest.data.voice,
@@ -40,12 +53,29 @@ liveRouter.post("/api/live/session", async (request, response) => {
         },
         client: {
           data_channel: {
-            allowed_client_events: ["session.close"],
+            allowed_client_events: [
+              "response.item.create",
+              "response.create",
+              "session.close",
+            ],
             allowed_server_events: [
               { type: "session.started" },
               { type: "session.closed" },
               { type: "session.input_transcript.delta" },
               { type: "session.output_transcript.delta" },
+              { type: "session.delegation.created" },
+              {
+                type: "response.event",
+                response_event: "response.output_item.done",
+              },
+              {
+                type: "response.event",
+                response_event: "response.completed",
+              },
+              {
+                type: "response.event",
+                response_event: "response.failed",
+              },
               { type: "error" },
               { type: "info" },
             ],

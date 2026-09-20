@@ -9,6 +9,7 @@ const voiceSelect = document.querySelector("#voice");
 const modelElement = document.querySelector("#model");
 const outputVolumeSlider = document.querySelector("#output-volume");
 const outputVolumeValue = document.querySelector("#output-volume-value");
+const toolActivityElement = document.querySelector("#tool-activity");
 
 const DEFAULT_OUTPUT_VOLUME = 70;
 const OUTPUT_VOLUME_STORAGE_KEY = "vs-voice-agent-output-volume";
@@ -40,6 +41,10 @@ const loggedRealtimeEvents = new Set([
 
 const setStatus = (message) => {
   statusElement.textContent = message;
+};
+
+const setToolActivity = (message) => {
+  toolActivityElement.textContent = message;
 };
 
 const readStoredOutputVolume = () => {
@@ -193,6 +198,7 @@ const startConversation = async () => {
         voice: selectedVoice,
         remoteAudio,
         setStatus,
+        setToolActivity,
         signal: abortController.signal,
       });
 

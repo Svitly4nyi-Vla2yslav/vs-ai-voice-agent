@@ -6,6 +6,7 @@ import express, {
 import { healthRouter } from "./routes/health.js";
 import { liveRouter } from "./routes/live.js";
 import { realtimeRouter } from "./routes/realtime.js";
+import { toolsRouter } from "./routes/tools.js";
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use(express.json());
 app.use(healthRouter);
 app.use(realtimeRouter);
 app.use(liveRouter);
+app.use(toolsRouter);
 app.use(express.static("public"));
 
 const notFoundHandler: RequestHandler = (_request, response) => {

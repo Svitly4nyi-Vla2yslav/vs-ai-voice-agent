@@ -1,6 +1,8 @@
 const loggedLiveEvents = new Set([
   "session.started",
   "session.closed",
+  "session.delegation.created",
+  "response.event",
   "error",
   "info",
 ]);
@@ -19,6 +21,10 @@ const logLiveEvent = (serverEvent) => {
     safeDetails.errorType = serverEvent.error?.type;
   } else if (serverEvent.type === "info") {
     safeDetails.infoCode = serverEvent.code;
+  } else if (serverEvent.type === "session.delegation.created") {
+    safeDetails.delegationTarget = serverEvent.delegation?.target;
+  } else if (serverEvent.type === "response.event") {
+    safeDetails.responseEventType = serverEvent.event?.type;
   }
 
   const logMethod = serverEvent.type === "error" ? "error" : "debug";
@@ -29,6 +35,7 @@ export const startLiveConversation = async ({
   voice,
   remoteAudio,
   setStatus,
+  setToolActivity,
   signal,
 }) => {
   let connection;
@@ -36,6 +43,109 @@ export const startLiveConversation = async ({
   let stream;
   let speakingTimer;
   let closed = false;
+  const handledToolCalls = new Set();
+  let toolQueue = Promise.resolve();
+
+  const sendLiveEvent = (clientEvent) => {
+    if (closed || channel?.readyState !== "open") {
+      throw new Error("live-channel-unavailable");
+    }
+    channel.send(JSON.stringify(clientEvent));
+  };
+
+  const executeToolCall = async (item) => {
+    if (
+      item?.type !== "function_call" ||
+      typeof item.call_id !== "string" ||
+      !item.call_id ||
+      typeof item.name !== "string" ||
+      !item.name ||
+      typeof item.arguments !== "string"
+    ) {
+      return;
+    }
+
+    if (handledToolCalls.has(item.call_id)) return;
+    handledToolCalls.add(item.call_id);
+    const isRegisteredTool = item.name === "prepareNextStep";
+    setToolActivity(
+      isRegisteredTool ? "prepareNextStep requested" : "Tool error",
+    );
+
+    let result;
+    try {
+      const response = await fetch("/api/tools/execute", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: item.name,
+          arguments: item.arguments,
+        }),
+        signal,
+      });
+
+      if (!response.ok) throw new Error("tool-execution-request-failed");
+      result = await response.json();
+      if (
+        !result ||
+        typeof result !== "object" ||
+        result.externalActionPerformed !== false ||
+        typeof result.status !== "string"
+      ) {
+        throw new Error("invalid-tool-result");
+      }
+
+      if (result.status === "needs_clarification") {
+        setToolActivity("Clarification required");
+      } else if (result.status === "prepared_only") {
+        setToolActivity("prepareNextStep completed");
+      } else {
+        setToolActivity("Tool error");
+      }
+    } catch (error) {
+      if (signal?.aborted) return;
+      console.error("[Agent Tool] relay failed", {
+        tool: isRegisteredTool ? "prepareNextStep" : "unknown",
+      });
+      setToolActivity("Tool error");
+      result = {
+        status: "tool_error",
+        error: "execution_failed",
+        externalActionPerformed: false,
+      };
+    }
+
+    try {
+      sendLiveEvent({
+        type: "response.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: item.call_id,
+          output: JSON.stringify(result),
+        },
+      });
+      sendLiveEvent({ type: "response.create" });
+    } catch {
+      setToolActivity("Tool error");
+    }
+  };
+
+  const handleResponseEvent = (serverEvent) => {
+    const nestedEvent = serverEvent.event;
+    if (
+      nestedEvent?.type === "response.output_item.done" &&
+      nestedEvent.item?.type === "function_call"
+    ) {
+      toolQueue = toolQueue
+        .then(() => executeToolCall(nestedEvent.item))
+        .catch(() => setToolActivity("Tool error"));
+    } else if (nestedEvent?.type === "response.failed") {
+      setToolActivity("Tool error");
+    }
+  };
 
   const close = () => {
     if (closed) return;
@@ -103,6 +213,8 @@ export const startLiveConversation = async ({
           speakingTimer = setTimeout(() => setStatus("Listening"), 1_200);
         } else if (serverEvent.type === "session.closed") {
           setStatus("Conversation ended");
+        } else if (serverEvent.type === "response.event") {
+          handleResponseEvent(serverEvent);
         } else if (serverEvent.type === "error") {
           setStatus("The Live session reported an error.");
         }
