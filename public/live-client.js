@@ -67,10 +67,21 @@ export const startLiveConversation = async ({
 
     if (handledToolCalls.has(item.call_id)) return;
     handledToolCalls.add(item.call_id);
-    const isRegisteredTool = item.name === "prepareNextStep";
-    setToolActivity(
-      isRegisteredTool ? "prepareNextStep requested" : "Tool error",
-    );
+    const registeredTools = new Set([
+      "prepareNextStep",
+      "getCalendarAvailability",
+      "bookMeeting",
+    ]);
+    const isRegisteredTool = registeredTools.has(item.name);
+    if (item.name === "getCalendarAvailability") {
+      setToolActivity("Checking calendar");
+    } else if (item.name === "bookMeeting") {
+      setToolActivity("Booking requested");
+    } else if (item.name === "prepareNextStep") {
+      setToolActivity("prepareNextStep requested");
+    } else {
+      setToolActivity("Tool error");
+    }
 
     let result;
     try {
@@ -92,7 +103,7 @@ export const startLiveConversation = async ({
       if (
         !result ||
         typeof result !== "object" ||
-        result.externalActionPerformed !== false ||
+        typeof result.externalActionPerformed !== "boolean" ||
         typeof result.status !== "string"
       ) {
         throw new Error("invalid-tool-result");
@@ -102,13 +113,31 @@ export const startLiveConversation = async ({
         setToolActivity("Clarification required");
       } else if (result.status === "prepared_only") {
         setToolActivity("prepareNextStep completed");
+      } else if (result.status === "available") {
+        setToolActivity("Slot available");
+      } else if (
+        result.status === "unavailable" ||
+        result.status === "outside_working_hours" ||
+        result.status === "slot_no_longer_available"
+      ) {
+        setToolActivity("Slot unavailable");
+      } else if (
+        result.status === "confirmed" &&
+        result.externalActionPerformed === true
+      ) {
+        setToolActivity("Meeting confirmed");
+      } else if (
+        result.status === "calendar_error" ||
+        result.status === "duplicate_conflict"
+      ) {
+        setToolActivity("Calendar error");
       } else {
         setToolActivity("Tool error");
       }
     } catch (error) {
       if (signal?.aborted) return;
       console.error("[Agent Tool] relay failed", {
-        tool: isRegisteredTool ? "prepareNextStep" : "unknown",
+        tool: isRegisteredTool ? item.name : "unknown",
       });
       setToolActivity("Tool error");
       result = {

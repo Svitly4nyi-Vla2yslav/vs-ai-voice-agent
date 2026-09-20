@@ -13,7 +13,7 @@ const toolExecutionRequestSchema = z
   })
   .strict();
 
-toolsRouter.post("/api/tools/execute", (request, response) => {
+toolsRouter.post("/api/tools/execute", async (request, response) => {
   if (!isSameOriginRequest(request)) {
     response.status(403).json({ error: "Unexpected request origin" });
     return;
@@ -25,7 +25,7 @@ toolsRouter.post("/api/tools/execute", (request, response) => {
     return;
   }
 
-  const result = executeAgentTool(
+  const result = await executeAgentTool(
     parsedRequest.data.name,
     parsedRequest.data.arguments,
   );

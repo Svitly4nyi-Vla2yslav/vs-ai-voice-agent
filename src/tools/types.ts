@@ -45,4 +45,12 @@ export type ToolFailureResult = {
   externalActionPerformed: false;
 };
 
-export type AgentToolResult = PrepareNextStepResult | ToolFailureResult;
+export type AgentToolResult =
+  | PrepareNextStepResult
+  | AvailabilityResult
+  | BookingResult
+  | ToolFailureResult;
+import type {
+  AvailabilityResult,
+  BookingResult,
+} from "../services/google-calendar.js";

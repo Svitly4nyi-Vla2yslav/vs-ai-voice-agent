@@ -1,8 +1,18 @@
 export {
   agentTools,
+  bookMeetingToolDefinition,
   executeAgentTool,
+  getCalendarAvailabilityToolDefinition,
   prepareNextStepToolDefinition,
 } from "./registry.js";
+export {
+  bookMeeting,
+  bookMeetingInputSchema,
+  getCalendarAvailability,
+  getCalendarAvailabilityInputSchema,
+  type BookMeetingInput,
+  type GetCalendarAvailabilityInput,
+} from "./calendar.js";
 export {
   prepareNextStep,
   prepareNextStepInputSchema,

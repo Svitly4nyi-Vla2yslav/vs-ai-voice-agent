@@ -30,7 +30,7 @@ assert.equal(
   "unknown fields should fail",
 );
 
-const missingDate = executeAgentTool("prepareNextStep", {
+const missingDate = await executeAgentTool("prepareNextStep", {
   type: "CALLBACK_REQUESTED",
   time: "15:00",
 });
@@ -41,14 +41,14 @@ assert.deepEqual(missingDate, {
   externalActionPerformed: false,
 });
 
-const unknownTool = executeAgentTool("notRegistered", {});
+const unknownTool = await executeAgentTool("notRegistered", {});
 assert.deepEqual(unknownTool, {
   status: "tool_error",
   error: "unknown_tool",
   externalActionPerformed: false,
 });
 
-const executionResult = executeAgentTool(
+const executionResult = await executeAgentTool(
   "prepareNextStep",
   JSON.stringify({
     ...validInput,
@@ -72,7 +72,7 @@ const actionInputs = [
 ] as const;
 
 for (const input of actionInputs) {
-  const result = executeAgentTool("prepareNextStep", input);
+  const result = await executeAgentTool("prepareNextStep", input);
   assert.equal(result.externalActionPerformed, false);
 }
 
