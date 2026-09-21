@@ -42,11 +42,11 @@ const environmentSchema = z.object({
   CALENDAR_WORKING_HOURS_START: z
     .string()
     .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
-    .default("10:30"),
+    .default("09:00"),
   CALENDAR_WORKING_HOURS_END: z
     .string()
     .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
-    .default("18:00"),
+    .default("17:00"),
   CALENDAR_DEFAULT_DURATION_MINUTES: z.coerce
     .number()
     .int()
@@ -58,7 +58,7 @@ const environmentSchema = z.object({
     .int()
     .min(0)
     .max(120)
-    .default(15),
+    .default(30),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3001),
 });
 

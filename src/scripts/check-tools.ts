@@ -8,6 +8,7 @@ import {
   prepareNextStep,
   prepareNextStepInputSchema,
   rescheduleMeetingInputSchema,
+  updateMeetingDetailsInputSchema,
 } from "../tools/index.js";
 
 const validInput = {
@@ -89,6 +90,7 @@ assert.deepEqual(
     "findEmmaMeetings",
     "rescheduleMeeting",
     "cancelMeeting",
+    "updateMeetingDetails",
   ],
 );
 assert.equal(findEmmaMeetingsInputSchema.safeParse({}).success, true);
@@ -110,6 +112,13 @@ assert.equal(
     idempotencyKey: "cancel-test-1",
   }).success,
   false,
+);
+assert.equal(
+  updateMeetingDetailsInputSchema.safeParse({
+    meetingRef: "emma_bWFuYWdlZC1ldmVudA",
+    notes: "Discuss automation",
+  }).success,
+  true,
 );
 
 console.log("Tool checks passed (registry, strict lifecycle schemas, and existing preparation behavior).");

@@ -4,6 +4,7 @@ import {
   GoogleCalendarService,
   type BusyPeriod,
   type CalendarEventToInsert,
+  type CalendarEventDetailsUpdate,
   type CalendarGateway,
   type CalendarSettings,
   type StoredCalendarEvent,
@@ -13,15 +14,16 @@ import {
   cancelMeetingInputSchema,
   findEmmaMeetingsInputSchema,
   rescheduleMeetingInputSchema,
+  updateMeetingDetailsInputSchema,
 } from "../tools/calendar.js";
 
 const settings: CalendarSettings = {
-  calendarId: "test-calendar",
+  calendarId: "vs-web-studio-booking",
   timezone: "Europe/Berlin",
-  workingHoursStart: "10:30",
-  workingHoursEnd: "18:00",
+  workingHoursStart: "09:00",
+  workingHoursEnd: "17:00",
   defaultDurationMinutes: 30,
-  bufferMinutes: 15,
+  bufferMinutes: 30,
 };
 
 class MockCalendarGateway implements CalendarGateway {
@@ -32,10 +34,15 @@ class MockCalendarGateway implements CalendarGateway {
   exclusionQueryCount = 0;
   updateCount = 0;
   deleteCount = 0;
+  detailsUpdateCount = 0;
+  insertedEvents: CalendarEventToInsert[] = [];
+  detailsUpdates: CalendarEventDetailsUpdate[] = [];
 
   async authenticate(): Promise<void> {}
 
-  async checkCalendarAccess(): Promise<void> {}
+  async checkCalendarAccess(): Promise<{ summary: string; timezone: string }> {
+    return { summary: "VS Web Studio Booking", timezone: "Europe/Berlin" };
+  }
 
   async getBusyPeriods(): Promise<BusyPeriod[]> {
     this.busyQueryCount += 1;
@@ -63,6 +70,7 @@ class MockCalendarGateway implements CalendarGateway {
 
   async insertEvent(event: CalendarEventToInsert): Promise<StoredCalendarEvent> {
     this.insertCount += 1;
+    this.insertedEvents.push(event);
     const stored: StoredCalendarEvent = {
       id: event.id,
       summary: event.summary,
@@ -70,10 +78,45 @@ class MockCalendarGateway implements CalendarGateway {
       start: event.start,
       end: event.end,
       timezone: event.timezone,
+      ...(event.location ? { location: event.location } : {}),
+      ...(event.meetingMode === "GOOGLE_MEET"
+        ? { meetUrl: `https://meet.google.com/${event.id.slice(0, 10)}` }
+        : {}),
+      hasConference: event.meetingMode === "GOOGLE_MEET",
       recurring: false,
       privateProperties: event.privateProperties,
     };
     this.events.set(event.id, stored);
+    return stored;
+  }
+
+  async updateEventDetails(
+    eventId: string,
+    update: CalendarEventDetailsUpdate,
+  ): Promise<StoredCalendarEvent> {
+    const existing = this.events.get(eventId);
+    if (!existing) throw Object.assign(new Error("not found"), { code: 404 });
+    this.detailsUpdateCount += 1;
+    this.detailsUpdates.push(update);
+    const hasConference =
+      update.conferenceAction === "create"
+        ? true
+        : update.conferenceAction === "clear"
+          ? false
+          : existing.hasConference;
+    const { location: _oldLocation, meetUrl: _oldMeetUrl, ...preserved } = existing;
+    const stored: StoredCalendarEvent = {
+      ...preserved,
+      summary: update.summary,
+      description: update.description,
+      ...(update.location ? { location: update.location } : {}),
+      ...(hasConference
+        ? { meetUrl: _oldMeetUrl ?? `https://meet.google.com/${eventId.slice(0, 10)}` }
+        : {}),
+      hasConference,
+      privateProperties: update.privateProperties,
+    };
+    this.events.set(eventId, stored);
     return stored;
   }
 
@@ -111,6 +154,7 @@ const availabilityInput = {
 } as const;
 
 const gateway = new MockCalendarGateway();
+const personalCalendarGateway = new MockCalendarGateway();
 const service = new GoogleCalendarService(gateway, settings);
 
 const available = await service.getAvailability(availabilityInput);
@@ -121,6 +165,12 @@ assert.deepEqual(
     start: "2026-09-25T15:00:00+02:00",
     end: "2026-09-25T15:30:00+02:00",
   },
+);
+assert.equal(gateway.busyQueryCount, 1, "configured booking calendar is queried once");
+assert.equal(
+  personalCalendarGateway.busyQueryCount,
+  0,
+  "an unrelated personal calendar gateway must never be queried",
 );
 
 gateway.busyPeriods = [
@@ -142,7 +192,7 @@ assert.ok(
 
 const outsideHours = await service.getAvailability({
   ...availabilityInput,
-  startTime: "10:00",
+  startTime: "08:30",
 });
 assert.equal(outsideHours.status, "outside_working_hours");
 
@@ -157,6 +207,23 @@ const bufferOverlap = await service.getAvailability({
   startTime: "15:10",
 });
 assert.equal(bufferOverlap.status, "unavailable");
+
+gateway.busyPeriods = [
+  {
+    start: "2026-09-25T14:00:00+02:00",
+    end: "2026-09-25T14:30:00+02:00",
+  },
+];
+const insideThirtyMinuteBuffer = await service.getAvailability({
+  ...availabilityInput,
+  startTime: "14:45",
+});
+assert.equal(insideThirtyMinuteBuffer.status, "unavailable");
+const exactBufferBoundary = await service.getAvailability({
+  ...availabilityInput,
+  startTime: "15:00",
+});
+assert.equal(exactBufferBoundary.status, "available");
 
 gateway.busyPeriods = [];
 const dstResult = await service.getAvailability({
@@ -173,10 +240,16 @@ assert.equal(
 
 const bookingInput = {
   contactName: "Test Customer",
+  companyName: "Example GmbH",
+  meetingMode: "GOOGLE_MEET",
   start: "2026-09-25T15:00:00+02:00",
   end: "2026-09-25T15:30:00+02:00",
   timezone: "Europe/Berlin",
   confirmation: true,
+  reason: "Website redesign",
+  currentSituation: "Existing website is outdated",
+  desiredOutcome: "A modern lead-generating website",
+  notes: "Discuss automation",
   idempotencyKey: "test-booking-20260925-1500",
 } as const;
 
@@ -189,6 +262,40 @@ assert.equal(
   }).success,
   false,
   "wrong Berlin offset must be rejected",
+);
+assert.equal(
+  bookMeetingInputSchema.safeParse({
+    ...bookingInput,
+    meetingMode: "PHONE",
+    phone: null,
+  }).success,
+  false,
+  "phone meetings require a confirmed phone number",
+);
+assert.equal(
+  bookMeetingInputSchema.safeParse({
+    ...bookingInput,
+    meetingMode: "PHONE",
+    phone: "+49 30 1234567",
+  }).success,
+  true,
+);
+assert.equal(
+  bookMeetingInputSchema.safeParse({
+    ...bookingInput,
+    meetingMode: "IN_PERSON",
+    location: null,
+  }).success,
+  false,
+  "in-person meetings require a location",
+);
+assert.equal(
+  bookMeetingInputSchema.safeParse({
+    ...bookingInput,
+    meetingMode: "IN_PERSON",
+    location: "Customer office, Berlin",
+  }).success,
+  true,
 );
 
 const noConfirmation = await service.bookMeeting({
@@ -208,6 +315,29 @@ assert.equal(gateway.insertCount, 0);
 const firstBooking = await service.bookMeeting(bookingInput);
 assert.equal(firstBooking.status, "confirmed");
 assert.equal(gateway.insertCount, 1);
+assert.equal(firstBooking.status === "confirmed" ? firstBooking.meetingMode : null, "GOOGLE_MEET");
+assert.ok(firstBooking.status === "confirmed" && firstBooking.meetUrl);
+assert.ok(gateway.insertedEvents[0]?.conferenceRequestId, "Meet creation request is required");
+assert.equal(gateway.insertedEvents[0]?.meetingMode, "GOOGLE_MEET");
+assert.match(gateway.insertedEvents[0]?.description ?? "", /Kontakt:\nTest Customer/u);
+assert.match(gateway.insertedEvents[0]?.description ?? "", /Firma:\nExample GmbH/u);
+assert.match(gateway.insertedEvents[0]?.description ?? "", /Gesprächsart:\nGoogle Meet/u);
+assert.match(gateway.insertedEvents[0]?.description ?? "", /Aktuelle Situation:/u);
+assert.match(gateway.insertedEvents[0]?.description ?? "", /Ziel:/u);
+assert.equal(gateway.insertedEvents[0]?.summary, "VS Web Studio – Beratung – Example GmbH");
+
+const secondMeetGateway = new MockCalendarGateway();
+const secondMeetService = new GoogleCalendarService(secondMeetGateway, settings);
+const secondMeetBooking = await secondMeetService.bookMeeting({
+  ...bookingInput,
+  idempotencyKey: "second-meet-booking-20260925-1500",
+});
+assert.equal(secondMeetBooking.status, "confirmed");
+assert.notEqual(
+  secondMeetGateway.insertedEvents[0]?.conferenceRequestId,
+  gateway.insertedEvents[0]?.conferenceRequestId,
+  "different events must use different Meet creation request IDs",
+);
 
 const duplicateBooking = await service.bookMeeting(bookingInput);
 assert.equal(duplicateBooking.status, "confirmed");
@@ -223,6 +353,78 @@ const conflictingDuplicate = await service.bookMeeting({
 });
 assert.equal(conflictingDuplicate.status, "duplicate_conflict");
 assert.equal(gateway.insertCount, 1);
+
+const phoneGateway = new MockCalendarGateway();
+const phoneService = new GoogleCalendarService(phoneGateway, settings);
+const phoneBooking = await phoneService.bookMeeting({
+  ...bookingInput,
+  meetingMode: "PHONE",
+  phone: "+49 30 1234567",
+  idempotencyKey: "phone-booking-20260925-1500",
+});
+assert.equal(phoneBooking.status, "confirmed");
+assert.equal(phoneGateway.insertedEvents[0]?.conferenceRequestId, undefined);
+assert.match(phoneGateway.insertedEvents[0]?.description ?? "", /Gesprächsart:\nTelefon/u);
+assert.match(phoneGateway.insertedEvents[0]?.description ?? "", /Telefon:\n\+49 30 1234567/u);
+
+const inPersonGateway = new MockCalendarGateway();
+const inPersonService = new GoogleCalendarService(inPersonGateway, settings);
+const inPersonBooking = await inPersonService.bookMeeting({
+  ...bookingInput,
+  meetingMode: "IN_PERSON",
+  location: "Customer office, Berlin",
+  idempotencyKey: "in-person-booking-20260925-1500",
+});
+assert.equal(inPersonBooking.status, "confirmed");
+assert.equal(inPersonGateway.insertedEvents[0]?.location, "Customer office, Berlin");
+assert.match(inPersonGateway.insertedEvents[0]?.description ?? "", /Gesprächsart:\nPersönlich/u);
+
+if (
+  firstBooking.status !== "confirmed" ||
+  phoneBooking.status !== "confirmed" ||
+  inPersonBooking.status !== "confirmed"
+) {
+  throw new Error("Expected all meeting-mode bookings to succeed");
+}
+const meetUrlBeforeReschedule = gateway.events.get(firstBooking.calendarEventId)?.meetUrl;
+const meetReschedule = await service.rescheduleMeeting({
+  meetingRef: `emma_${Buffer.from(firstBooking.calendarEventId).toString("base64url")}`,
+  newStart: "2026-09-28T16:00:00+02:00",
+  newEnd: "2026-09-28T16:30:00+02:00",
+  timezone: "Europe/Berlin",
+  confirmation: true,
+  idempotencyKey: "preserve-meet-details",
+});
+assert.equal(meetReschedule.status, "rescheduled");
+assert.equal(gateway.events.get(firstBooking.calendarEventId)?.meetUrl, meetUrlBeforeReschedule);
+assert.equal(
+  gateway.events.get(firstBooking.calendarEventId)?.privateProperties.vsAiMeetingMode,
+  "GOOGLE_MEET",
+);
+
+const phoneDescriptionBefore = phoneGateway.events.get(phoneBooking.calendarEventId)?.description;
+await phoneService.rescheduleMeeting({
+  meetingRef: `emma_${Buffer.from(phoneBooking.calendarEventId).toString("base64url")}`,
+  newStart: "2026-09-28T13:00:00+02:00",
+  newEnd: "2026-09-28T13:30:00+02:00",
+  timezone: "Europe/Berlin",
+  confirmation: true,
+  idempotencyKey: "preserve-phone-details",
+});
+assert.equal(phoneGateway.events.get(phoneBooking.calendarEventId)?.description, phoneDescriptionBefore);
+
+await inPersonService.rescheduleMeeting({
+  meetingRef: `emma_${Buffer.from(inPersonBooking.calendarEventId).toString("base64url")}`,
+  newStart: "2026-09-28T12:00:00+02:00",
+  newEnd: "2026-09-28T12:30:00+02:00",
+  timezone: "Europe/Berlin",
+  confirmation: true,
+  idempotencyKey: "preserve-location-details",
+});
+assert.equal(
+  inPersonGateway.events.get(inPersonBooking.calendarEventId)?.location,
+  "Customer office, Berlin",
+);
 
 const raceGateway = new MockCalendarGateway();
 raceGateway.busyPeriods = [
@@ -247,12 +449,17 @@ const lifecycleService = new GoogleCalendarService(lifecycleGateway, settings);
 const managedEvent: StoredCalendarEvent = {
   id: "managed-event-1",
   summary: "VS Web Studio consultation",
-  description: "Contact: Erika Muster\nCompany: Muster GmbH\nReason: Website relaunch\nSource: VS AI Voice Agent / Emma",
+  description: "Contact: Erika Muster\nCompany: Muster GmbH\nPhone: +49 30 7654321\nReason: Website relaunch\nSource: VS AI Voice Agent / Emma",
   start: "2026-09-25T15:00:00+02:00",
   end: "2026-09-25T15:30:00+02:00",
   timezone: "Europe/Berlin",
   recurring: false,
-  privateProperties: { vsAiSource: "emma", vsAiRequestHash: "original-hash" },
+  hasConference: false,
+  privateProperties: {
+    vsAiSource: "emma",
+    vsAiRequestHash: "original-hash",
+    vsAiMeetingMode: "PHONE",
+  },
 };
 const unmanagedEvent: StoredCalendarEvent = {
   ...managedEvent,
@@ -368,6 +575,16 @@ assert.equal(
   "original-hash",
   "booking metadata must survive reschedule",
 );
+assert.match(
+  lifecycleGateway.events.get(managedEvent.id)?.description ?? "",
+  /Website relaunch/u,
+  "reschedule must preserve contextual description",
+);
+assert.equal(
+  lifecycleGateway.events.get(managedEvent.id)?.privateProperties.vsAiMeetingMode,
+  "PHONE",
+  "reschedule must preserve meeting mode",
+);
 
 const duplicateReschedule = await lifecycleService.rescheduleMeeting(rescheduleInput);
 assert.equal(duplicateReschedule.status, "rescheduled");
@@ -397,6 +614,89 @@ assert.equal(busyReschedule.status, "slot_no_longer_available");
 assert.equal(busyGateway.exclusionQueryCount, 1);
 assert.equal(busyGateway.updateCount, 0);
 
+assert.equal(
+  updateMeetingDetailsInputSchema.safeParse({
+    meetingRef,
+    companyName: "Updated GmbH",
+    notes: "Also discuss automation",
+  }).success,
+  true,
+);
+const updatedContext = await lifecycleService.updateMeetingDetails({
+  meetingRef,
+  contactName: "Erika Beispiel",
+  companyName: "Updated GmbH",
+  notes: "Also discuss automation",
+});
+assert.equal(updatedContext.status, "details_updated");
+const contextEvent = lifecycleGateway.events.get(managedEvent.id);
+assert.equal(contextEvent?.start, rescheduleInput.newStart);
+assert.equal(contextEvent?.end, rescheduleInput.newEnd);
+assert.equal(contextEvent?.summary, "VS Web Studio – Beratung – Updated GmbH");
+assert.match(contextEvent?.description ?? "", /Kontakt:\nErika Beispiel/u);
+assert.match(contextEvent?.description ?? "", /Zusätzliche Notizen:\nAlso discuss automation/u);
+assert.equal(contextEvent?.privateProperties.vsAiRequestHash, "original-hash");
+assert.ok(contextEvent?.privateProperties.vsAiLastMutationKey);
+
+const unmanagedDetailsUpdate = await lifecycleService.updateMeetingDetails({
+  meetingRef: unmanagedRef,
+  notes: "Must not be written",
+});
+assert.equal(unmanagedDetailsUpdate.status, "not_managed_by_emma");
+
+const phoneToMeet = await lifecycleService.updateMeetingDetails({
+  meetingRef,
+  meetingMode: "GOOGLE_MEET",
+});
+assert.equal(phoneToMeet.status, "details_updated");
+assert.equal(lifecycleGateway.detailsUpdates.at(-1)?.conferenceAction, "create");
+assert.ok(lifecycleGateway.detailsUpdates.at(-1)?.conferenceRequestId);
+assert.equal(lifecycleGateway.events.get(managedEvent.id)?.hasConference, true);
+assert.equal(lifecycleGateway.events.get(managedEvent.id)?.location, undefined);
+const firstMeetUrl = lifecycleGateway.events.get(managedEvent.id)?.meetUrl;
+const meetNoteUpdate = await lifecycleService.updateMeetingDetails({
+  meetingRef,
+  notes: "Keep the same Meet while adding this note",
+});
+assert.equal(meetNoteUpdate.status, "details_updated");
+assert.equal(lifecycleGateway.detailsUpdates.at(-1)?.conferenceAction, "preserve");
+assert.equal(lifecycleGateway.detailsUpdates.at(-1)?.conferenceRequestId, undefined);
+assert.equal(lifecycleGateway.events.get(managedEvent.id)?.meetUrl, firstMeetUrl);
+
+const meetToPhone = await lifecycleService.updateMeetingDetails({
+  meetingRef,
+  meetingMode: "PHONE",
+  phone: "+49 30 1111111",
+});
+assert.equal(meetToPhone.status, "details_updated");
+assert.equal(lifecycleGateway.detailsUpdates.at(-1)?.conferenceAction, "clear");
+assert.equal(lifecycleGateway.events.get(managedEvent.id)?.hasConference, false);
+assert.match(
+  lifecycleGateway.events.get(managedEvent.id)?.description ?? "",
+  /Telefon:\n\+49 30 1111111/u,
+);
+
+const phoneToInPerson = await lifecycleService.updateMeetingDetails({
+  meetingRef,
+  meetingMode: "IN_PERSON",
+  location: "Musterstraße 1, Berlin",
+});
+assert.equal(phoneToInPerson.status, "details_updated");
+assert.equal(lifecycleGateway.events.get(managedEvent.id)?.location, "Musterstraße 1, Berlin");
+assert.equal(
+  (lifecycleGateway.events.get(managedEvent.id)?.description ?? "").includes("Telefon:\n"),
+  false,
+);
+
+const inPersonToMeet = await lifecycleService.updateMeetingDetails({
+  meetingRef,
+  meetingMode: "GOOGLE_MEET",
+});
+assert.equal(inPersonToMeet.status, "details_updated");
+assert.equal(lifecycleGateway.detailsUpdates.at(-1)?.conferenceAction, "create");
+assert.equal(lifecycleGateway.events.get(managedEvent.id)?.location, undefined);
+assert.equal(lifecycleGateway.events.get(managedEvent.id)?.hasConference, true);
+
 const cancelWithoutConfirmation = await lifecycleService.cancelMeeting({
   meetingRef,
   confirmation: false,
@@ -418,4 +718,4 @@ const repeatedCancel = await lifecycleService.cancelMeeting({
 assert.equal(repeatedCancel.status, "not_found_or_already_cancelled");
 assert.equal(lifecycleGateway.deleteCount, 1);
 
-console.log("Calendar checks passed (booking plus managed find/reschedule/cancel lifecycle, privacy, ownership, confirmation, availability re-check, idempotency, metadata preservation).");
+console.log("Calendar checks passed (dedicated-calendar isolation, 30-minute buffer boundary, rich Meet/phone/in-person bookings, managed find/reschedule/update/cancel lifecycle, conference transitions, privacy, ownership, confirmation, idempotency, metadata preservation).");

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import {
   CALENDAR_TIMEZONE,
+  MEETING_MODES,
   createGoogleCalendarGateway,
   GoogleCalendarService,
   type AvailabilityResult,
@@ -12,6 +13,7 @@ import {
   type CalendarSettings,
   type FindEmmaMeetingsResult,
   type RescheduleMeetingResult,
+  type UpdateMeetingDetailsResult,
 } from "../services/google-calendar.js";
 
 const emptyToUndefined = (value: unknown): unknown =>
@@ -37,6 +39,16 @@ const dateSchema = z
   );
 
 const timeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+const phoneSchema = z.preprocess(
+  emptyToUndefined,
+  z
+    .string()
+    .trim()
+    .min(7)
+    .max(32)
+    .regex(/^\+?[0-9][0-9 ()/.-]{5,30}$/)
+    .optional(),
+);
 
 export const getCalendarAvailabilityInputSchema = z
   .object({
@@ -104,8 +116,16 @@ export const bookMeetingInputSchema = z
       emptyToUndefined,
       z.string().trim().email().max(254).optional(),
     ),
-    phone: optionalString(50),
+    meetingMode: z.enum(MEETING_MODES),
+    phone: phoneSchema,
+    useCurrentCallNumber: z.preprocess(
+      emptyToUndefined,
+      z.boolean().optional(),
+    ),
+    location: optionalString(300),
     reason: optionalString(500),
+    currentSituation: optionalString(1_000),
+    desiredOutcome: optionalString(1_000),
     notes: optionalString(1_000),
     confirmation: z.boolean().optional(),
     idempotencyKey: z
@@ -132,6 +152,27 @@ export const bookMeetingInputSchema = z
         code: "custom",
         path: ["end"],
         message: "Meeting must start and end on the same local date",
+      });
+    }
+    if (input.meetingMode === "PHONE" && !input.phone) {
+      context.addIssue({
+        code: "custom",
+        path: ["phone"],
+        message: "A confirmed callback number is required in the browser MVP",
+      });
+    }
+    if (input.useCurrentCallNumber) {
+      context.addIssue({
+        code: "custom",
+        path: ["useCurrentCallNumber"],
+        message: "The browser MVP has no verified current caller number",
+      });
+    }
+    if (input.meetingMode === "IN_PERSON" && !input.location) {
+      context.addIssue({
+        code: "custom",
+        path: ["location"],
+        message: "A confirmed location is required for an in-person meeting",
       });
     }
   });
@@ -225,6 +266,54 @@ export const cancelMeetingInputSchema = z
 
 export type CancelMeetingInput = z.infer<typeof cancelMeetingInputSchema>;
 
+export const updateMeetingDetailsInputSchema = z
+  .object({
+    meetingRef: meetingReferenceSchema,
+    contactName: optionalString(120),
+    companyName: optionalString(160),
+    meetingMode: z.preprocess(
+      emptyToUndefined,
+      z.enum(MEETING_MODES).optional(),
+    ),
+    phone: phoneSchema,
+    location: optionalString(300),
+    reason: optionalString(500),
+    currentSituation: optionalString(1_000),
+    desiredOutcome: optionalString(1_000),
+    notes: optionalString(1_000),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const hasUpdate = Object.entries(input).some(
+      ([key, value]) => key !== "meetingRef" && value !== undefined,
+    );
+    if (!hasUpdate) {
+      context.addIssue({
+        code: "custom",
+        path: [],
+        message: "At least one meeting detail must be supplied",
+      });
+    }
+    if (input.meetingMode === "PHONE" && !input.phone) {
+      context.addIssue({
+        code: "custom",
+        path: ["phone"],
+        message: "A phone number is required when changing to PHONE",
+      });
+    }
+    if (input.meetingMode === "IN_PERSON" && !input.location) {
+      context.addIssue({
+        code: "custom",
+        path: ["location"],
+        message: "A location is required when changing to IN_PERSON",
+      });
+    }
+  });
+
+export type UpdateMeetingDetailsInput = z.infer<
+  typeof updateMeetingDetailsInputSchema
+>;
+
 let calendarService: GoogleCalendarService | undefined;
 
 const getConfiguredCalendarService = (): GoogleCalendarService | undefined => {
@@ -276,13 +365,18 @@ const withCalendarDiagnostic = <T extends { status: string }>(
   const category =
     result.status === "calendar_error"
       ? reason === "unavailable"
-        ? "provider unavailable"
-        : reason
+        ? "provider_unavailable"
+        : reason === "configuration"
+          ? "configuration_error"
+          : reason === "authentication"
+            ? "authentication_error"
+            : reason
       : result.status === "unavailable" ||
-          result.status === "outside_working_hours" ||
           result.status === "slot_no_longer_available"
-        ? "slot unavailable"
-        : result.status;
+        ? "slot_unavailable"
+        : result.status === "outside_working_hours"
+          ? "outside_working_hours"
+          : result.status;
   console.info("[Calendar] diagnostic", { operation, category });
   return result;
 };
@@ -332,4 +426,15 @@ export const cancelMeeting = async (
   const service = getConfiguredCalendarService();
   if (!service) return withCalendarDiagnostic("cancel", notConfigured());
   return withCalendarDiagnostic("cancel", await service.cancelMeeting(input));
+};
+
+export const updateMeetingDetails = async (
+  input: UpdateMeetingDetailsInput,
+): Promise<UpdateMeetingDetailsResult> => {
+  const service = getConfiguredCalendarService();
+  if (!service) return withCalendarDiagnostic("update_details", notConfigured());
+  return withCalendarDiagnostic(
+    "update_details",
+    await service.updateMeetingDetails(input),
+  );
 };

@@ -61,8 +61,13 @@ const parsed = bookMeetingInputSchema.safeParse({
   end,
   timezone: "Europe/Berlin",
   customerEmail: null,
+  meetingMode: "GOOGLE_MEET",
   phone: null,
+  useCurrentCallNumber: null,
+  location: null,
   reason: "Explicit manual integration test",
+  currentSituation: null,
+  desiredOutcome: null,
   notes: null,
   confirmation: true,
   idempotencyKey: `manual-test-${createHash("sha256")

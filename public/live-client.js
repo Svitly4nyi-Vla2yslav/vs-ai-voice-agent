@@ -74,6 +74,7 @@ export const startLiveConversation = async ({
       "findEmmaMeetings",
       "rescheduleMeeting",
       "cancelMeeting",
+      "updateMeetingDetails",
     ]);
     const isRegisteredTool = registeredTools.has(item.name);
     if (item.name === "getCalendarAvailability") {
@@ -86,6 +87,8 @@ export const startLiveConversation = async ({
       setToolActivity("Rescheduling");
     } else if (item.name === "cancelMeeting") {
       setToolActivity("Cancelling");
+    } else if (item.name === "updateMeetingDetails") {
+      setToolActivity("Updating meeting details");
     } else if (item.name === "prepareNextStep") {
       setToolActivity("prepareNextStep requested");
     } else {
@@ -143,12 +146,15 @@ export const startLiveConversation = async ({
         setToolActivity("Meeting rescheduled");
       } else if (result.status === "cancelled") {
         setToolActivity("Meeting cancelled");
+      } else if (result.status === "details_updated") {
+        setToolActivity("Meeting details updated");
       } else if (
         result.status === "no_meetings" ||
         result.status === "not_found" ||
         result.status === "not_found_or_already_cancelled" ||
         result.status === "not_managed_by_emma" ||
         result.status === "recurring_event_not_supported" ||
+        result.status === "details_required" ||
         result.status === "confirmation_required"
       ) {
         setToolActivity("Clarification required");

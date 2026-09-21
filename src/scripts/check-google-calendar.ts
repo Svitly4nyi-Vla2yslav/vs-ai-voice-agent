@@ -20,6 +20,9 @@ const clientId = value("GOOGLE_CLIENT_ID");
 const clientSecret = value("GOOGLE_CLIENT_SECRET");
 const refreshToken = value("GOOGLE_REFRESH_TOKEN");
 const configuredTimezone = value("CALENDAR_TIMEZONE") ?? CALENDAR_TIMEZONE;
+const safeCalendarName = (summary: string | undefined): string =>
+  summary?.replace(/[\u0000-\u001f\u007f]/gu, " ").trim().slice(0, 120) ||
+  "accessible";
 
 console.log("Google Calendar diagnostics\n");
 console.log("Environment:");
@@ -35,13 +38,13 @@ if (calendarId === "primary") {
 }
 
 if (!calendarId || !clientId || !clientSecret || !refreshToken) {
-  console.error("\nDiagnostics stopped: configuration missing.");
+  console.error("\nDiagnostics stopped: configuration_error.");
   process.exitCode = 1;
 } else if (
   configuredTimezone !== CALENDAR_TIMEZONE ||
   !IANAZone.isValidZone(configuredTimezone)
 ) {
-  console.error("\nDiagnostics stopped: timezone configuration is invalid.");
+  console.error("\nDiagnostics stopped: configuration_error (invalid timezone).");
   process.exitCode = 1;
 } else {
   const settings: CalendarSettings = {
@@ -61,10 +64,10 @@ if (!calendarId || !clientId || !clientSecret || !refreshToken) {
   const diagnosticReason = (error: unknown): string => {
     const reason: CalendarFailureResult["reason"] =
       error instanceof CalendarProviderError ? error.reason : "unavailable";
-    if (reason === "authentication") return "authentication";
-    if (reason === "rate_limited") return "rate limited";
-    if (reason === "configuration") return "configuration";
-    return "provider unavailable";
+    if (reason === "authentication") return "authentication_error";
+    if (reason === "rate_limited") return "rate_limited";
+    if (reason === "configuration") return "configuration_error";
+    return "provider_unavailable";
   };
 
   try {
@@ -77,10 +80,11 @@ if (!calendarId || !clientId || !clientSecret || !refreshToken) {
 
   if (!process.exitCode) {
     try {
-      await gateway.checkCalendarAccess();
+      const calendar = await gateway.checkCalendarAccess();
+      console.log(`Configured calendar: ${safeCalendarName(calendar.summary)}`);
       console.log("Configured calendar access: OK");
     } catch (error) {
-      console.error(`Configured calendar access: FAILED (${diagnosticReason(error)})`);
+      console.error("Configured calendar access: FAILED (calendar_not_accessible)");
       process.exitCode = 1;
     }
   }

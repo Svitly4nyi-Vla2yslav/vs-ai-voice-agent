@@ -11,6 +11,8 @@ import {
   getCalendarAvailabilityInputSchema,
   rescheduleMeeting,
   rescheduleMeetingInputSchema,
+  updateMeetingDetails,
+  updateMeetingDetailsInputSchema,
 } from "./calendar.js";
 import {
   prepareNextStep,
@@ -139,8 +141,20 @@ export const bookMeetingToolDefinition = {
       },
       timezone: { type: "string", enum: ["Europe/Berlin"] },
       customerEmail: nullableString,
+      meetingMode: {
+        type: "string",
+        enum: ["GOOGLE_MEET", "PHONE", "IN_PERSON"],
+        description: "Confirmed synchronous meeting mode. Email is not a meeting mode.",
+      },
       phone: nullableString,
+      useCurrentCallNumber: {
+        type: ["boolean", "null"],
+        description: "Use only when a verified telephony context supplies the current caller number; false/null in the browser MVP.",
+      },
+      location: nullableString,
       reason: nullableString,
+      currentSituation: nullableString,
+      desiredOutcome: nullableString,
       notes: nullableString,
       confirmation: {
         type: "boolean",
@@ -160,8 +174,13 @@ export const bookMeetingToolDefinition = {
       "end",
       "timezone",
       "customerEmail",
+      "meetingMode",
       "phone",
+      "useCurrentCallNumber",
+      "location",
       "reason",
+      "currentSituation",
+      "desiredOutcome",
       "notes",
       "confirmation",
       "idempotencyKey",
@@ -228,6 +247,45 @@ export const cancelMeetingToolDefinition = {
   },
 } satisfies FunctionTool;
 
+export const updateMeetingDetailsToolDefinition = {
+  type: "function",
+  name: "updateMeetingDetails",
+  description:
+    "Add or change contextual details or meeting mode on one selected Emma-managed meeting without changing its start or end time.",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      meetingRef: { type: "string", description: "Opaque reference returned by findEmmaMeetings." },
+      contactName: nullableString,
+      companyName: nullableString,
+      meetingMode: {
+        type: ["string", "null"],
+        enum: ["GOOGLE_MEET", "PHONE", "IN_PERSON", null],
+      },
+      phone: nullableString,
+      location: nullableString,
+      reason: nullableString,
+      currentSituation: nullableString,
+      desiredOutcome: nullableString,
+      notes: nullableString,
+    },
+    required: [
+      "meetingRef",
+      "contactName",
+      "companyName",
+      "meetingMode",
+      "phone",
+      "location",
+      "reason",
+      "currentSituation",
+      "desiredOutcome",
+      "notes",
+    ],
+  },
+} satisfies FunctionTool;
+
 export const agentTools = [
   prepareNextStepToolDefinition,
   getCalendarAvailabilityToolDefinition,
@@ -235,6 +293,7 @@ export const agentTools = [
   findEmmaMeetingsToolDefinition,
   rescheduleMeetingToolDefinition,
   cancelMeetingToolDefinition,
+  updateMeetingDetailsToolDefinition,
 ] satisfies FunctionTool[];
 
 const registeredToolNames = new Set(agentTools.map((tool) => tool.name));
@@ -308,11 +367,16 @@ export const executeAgentTool = async (
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
       result = await rescheduleMeeting(parsed.data);
-    } else {
+    } else if (name === "cancelMeeting") {
       const parsed = cancelMeetingInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
       result = await cancelMeeting(parsed.data);
+    } else {
+      const parsed = updateMeetingDetailsInputSchema.safeParse(argumentsValue);
+      if (!parsed.success) return failure("invalid_arguments");
+      console.info("[Agent Tool] validated", { tool: name });
+      result = await updateMeetingDetails(parsed.data);
     }
 
     console.info("[Agent Tool] completed", {

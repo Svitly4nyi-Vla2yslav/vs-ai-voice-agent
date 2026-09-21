@@ -7,6 +7,7 @@ export {
   getCalendarAvailabilityToolDefinition,
   prepareNextStepToolDefinition,
   rescheduleMeetingToolDefinition,
+  updateMeetingDetailsToolDefinition,
 } from "./registry.js";
 export {
   bookMeeting,
@@ -19,11 +20,14 @@ export {
   getCalendarAvailabilityInputSchema,
   rescheduleMeeting,
   rescheduleMeetingInputSchema,
+  updateMeetingDetails,
+  updateMeetingDetailsInputSchema,
   type BookMeetingInput,
   type CancelMeetingInput,
   type FindEmmaMeetingsInput,
   type GetCalendarAvailabilityInput,
   type RescheduleMeetingInput,
+  type UpdateMeetingDetailsInput,
 } from "./calendar.js";
 export {
   prepareNextStep,
