@@ -8,7 +8,10 @@ import {
   GoogleCalendarService,
   type AvailabilityResult,
   type BookingResult,
+  type CancelMeetingResult,
   type CalendarSettings,
+  type FindEmmaMeetingsResult,
+  type RescheduleMeetingResult,
 } from "../services/google-calendar.js";
 
 const emptyToUndefined = (value: unknown): unknown =>
@@ -135,6 +138,93 @@ export const bookMeetingInputSchema = z
 
 export type BookMeetingInput = z.infer<typeof bookMeetingInputSchema>;
 
+export const findEmmaMeetingsInputSchema = z
+  .object({
+    dateFrom: z.preprocess(emptyToUndefined, dateSchema.optional()),
+    dateTo: z.preprocess(emptyToUndefined, dateSchema.optional()),
+    contactName: optionalString(120),
+    companyName: optionalString(160),
+    approximateDate: z.preprocess(emptyToUndefined, dateSchema.optional()),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.dateFrom && input.dateTo) {
+      const from = DateTime.fromISO(input.dateFrom);
+      const to = DateTime.fromISO(input.dateTo);
+      if (to < from) {
+        context.addIssue({
+          code: "custom",
+          path: ["dateTo"],
+          message: "dateTo must not be before dateFrom",
+        });
+      } else if (to.diff(from, "days").days > 366) {
+        context.addIssue({
+          code: "custom",
+          path: ["dateTo"],
+          message: "Search window must not exceed 366 days",
+        });
+      }
+    }
+  });
+
+export type FindEmmaMeetingsInput = z.infer<typeof findEmmaMeetingsInputSchema>;
+
+const meetingReferenceSchema = z
+  .string()
+  .trim()
+  .min(10)
+  .max(1024)
+  .regex(/^emma_[A-Za-z0-9_-]+$/);
+
+const idempotencyKeySchema = z
+  .string()
+  .trim()
+  .min(8)
+  .max(160)
+  .regex(/^[A-Za-z0-9._:-]+$/);
+
+export const rescheduleMeetingInputSchema = z
+  .object({
+    meetingRef: meetingReferenceSchema,
+    newStart: zonedDateTimeSchema,
+    newEnd: zonedDateTimeSchema,
+    timezone: z.literal(CALENDAR_TIMEZONE),
+    confirmation: z.literal(true),
+    idempotencyKey: idempotencyKeySchema,
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const start = DateTime.fromISO(input.newStart, { setZone: true });
+    const end = DateTime.fromISO(input.newEnd, { setZone: true });
+    const duration = end.diff(start, "minutes").minutes;
+    if (duration < 15 || duration > 120) {
+      context.addIssue({
+        code: "custom",
+        path: ["newEnd"],
+        message: "Meeting duration must be between 15 and 120 minutes",
+      });
+    }
+    if (start.toFormat("yyyy-MM-dd") !== end.toFormat("yyyy-MM-dd")) {
+      context.addIssue({
+        code: "custom",
+        path: ["newEnd"],
+        message: "Meeting must start and end on the same local date",
+      });
+    }
+  });
+
+export type RescheduleMeetingInput = z.infer<typeof rescheduleMeetingInputSchema>;
+
+export const cancelMeetingInputSchema = z
+  .object({
+    meetingRef: meetingReferenceSchema,
+    confirmation: z.literal(true),
+    idempotencyKey: idempotencyKeySchema,
+  })
+  .strict();
+
+export type CancelMeetingInput = z.infer<typeof cancelMeetingInputSchema>;
+
 let calendarService: GoogleCalendarService | undefined;
 
 const getConfiguredCalendarService = (): GoogleCalendarService | undefined => {
@@ -175,14 +265,35 @@ const notConfigured = () => ({
   externalActionPerformed: false as const,
 });
 
+const withCalendarDiagnostic = <T extends { status: string }>(
+  operation: string,
+  result: T,
+): T => {
+  const reason =
+    "reason" in result && typeof result.reason === "string"
+      ? result.reason
+      : undefined;
+  const category =
+    result.status === "calendar_error"
+      ? reason === "unavailable"
+        ? "provider unavailable"
+        : reason
+      : result.status === "unavailable" ||
+          result.status === "outside_working_hours" ||
+          result.status === "slot_no_longer_available"
+        ? "slot unavailable"
+        : result.status;
+  console.info("[Calendar] diagnostic", { operation, category });
+  return result;
+};
+
 export const getCalendarAvailability = async (
   input: GetCalendarAvailabilityInput,
 ): Promise<AvailabilityResult> => {
   const service = getConfiguredCalendarService();
-  if (!service) return notConfigured();
+  if (!service) return withCalendarDiagnostic("availability", notConfigured());
   const result = await service.getAvailability(input);
-  console.info("[Calendar] availability checked", { status: result.status });
-  return result;
+  return withCalendarDiagnostic("availability", result);
 };
 
 export const bookMeeting = async (
@@ -195,6 +306,30 @@ export const bookMeeting = async (
     };
   }
   const service = getConfiguredCalendarService();
-  if (!service) return notConfigured();
-  return service.bookMeeting(input);
+  if (!service) return withCalendarDiagnostic("booking", notConfigured());
+  return withCalendarDiagnostic("booking", await service.bookMeeting(input));
+};
+
+export const findEmmaMeetings = async (
+  input: FindEmmaMeetingsInput,
+): Promise<FindEmmaMeetingsResult> => {
+  const service = getConfiguredCalendarService();
+  if (!service) return withCalendarDiagnostic("find", notConfigured());
+  return withCalendarDiagnostic("find", await service.findEmmaMeetings(input));
+};
+
+export const rescheduleMeeting = async (
+  input: RescheduleMeetingInput,
+): Promise<RescheduleMeetingResult> => {
+  const service = getConfiguredCalendarService();
+  if (!service) return withCalendarDiagnostic("reschedule", notConfigured());
+  return withCalendarDiagnostic("reschedule", await service.rescheduleMeeting(input));
+};
+
+export const cancelMeeting = async (
+  input: CancelMeetingInput,
+): Promise<CancelMeetingResult> => {
+  const service = getConfiguredCalendarService();
+  if (!service) return withCalendarDiagnostic("cancel", notConfigured());
+  return withCalendarDiagnostic("cancel", await service.cancelMeeting(input));
 };

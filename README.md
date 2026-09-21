@@ -2,13 +2,16 @@
 
 ## Current status
 
-**Phase 4B – Google Calendar Integration.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback remains `gpt-realtime-2.1-mini`.
+**Phase 4C – Calendar Meeting Lifecycle.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback remains `gpt-realtime-2.1-mini`.
 
 The registered backend tools are:
 
 - `prepareNextStep` — preparation only for callbacks, information requests, human handoff, and initial meeting normalization.
 - `getCalendarAvailability` — reads sanitized Google Calendar free/busy data.
 - `bookMeeting` — creates a real consultation event only after explicit confirmation and a final availability re-check.
+- `findEmmaMeetings` — finds at most three sanitized Emma-created meeting candidates in a bounded window.
+- `rescheduleMeeting` — updates one selected Emma event only after availability is re-checked and the exact change is explicitly confirmed.
+- `cancelMeeting` — deletes one selected Emma event only after explicit cancellation confirmation.
 
 Callbacks are not Calendar meetings. Gmail, email sending, CRM, Firebase, LeadFlow, Twilio, SIP, calls, and human telephone transfer remain unimplemented.
 
@@ -28,11 +31,19 @@ The timezone is `Europe/Berlin`. Luxon handles UTC offsets and daylight-saving t
 - 15-minute buffer around existing events
 - at most three alternatives
 
+Production should use a dedicated Google Calendar named **VS Web Studio Booking**. Set `GOOGLE_CALENDAR_ID` to that calendar's ID, not `primary`. Every availability check, booking, managed-meeting lookup, reschedule, and cancellation is scoped exclusively to the configured calendar; the application does not additionally read the primary calendar.
+
+This intentionally means personal appointments and tasks do not block VS Web Studio customer appointments. Only busy events in the dedicated booking calendar participate in customer availability, while customer appointments in that calendar continue to block one another.
+
 Hours, default duration, and buffer are server configuration. Dates must be resolved to `YYYY-MM-DD`; ambiguous relative dates must be clarified conversationally.
 
 Availability uses Google Calendar `freebusy.query`. Existing titles, descriptions, attendees, addresses, and event IDs are never returned. Only requested-slot status and sanitized alternative intervals enter the Live tool flow.
 
+Meeting lookup uses Google Calendar `events.list` with the official `privateExtendedProperty=vsAiSource=emma` filter and a bounded date range (by default 30 days back through 180 days ahead). The service returns at most three sanitized candidates and represents the Google event ID as an opaque `meetingRef`. Optional contact/company matching happens only within the already provider-filtered Emma event set. Two or three candidates require conversational clarification; Emma may never guess.
+
 Booking requires an exact start, end, `Europe/Berlin`, literal explicit confirmation, and an idempotency key. The service checks the slot again immediately before insertion. Created events are private, opaque/busy, send no attendee updates, and do not store customer email or phone. Descriptions contain only supplied contact/company/business context and the Emma source marker.
+
+Before every reschedule or cancellation, the backend fetches the selected event again and requires `extendedProperties.private.vsAiSource=emma`. Missing/different ownership returns `not_managed_by_emma`; recurring events are also rejected. Rescheduling patches the existing event, preserving its identity, description, and private metadata. Its final availability check internally lists overlapping events and excludes only the selected event ID, so the current appointment does not block itself while any other overlapping event still does. No raw event contents enter the model or visible UI.
 
 ## Duplicate-call protection
 
@@ -43,6 +54,8 @@ The browser ignores repeated Live events with the same function `call_id`. For d
 - Concurrent insert conflict: reloads the deterministic event and verifies the private request hash.
 
 This works across cold Netlify instances because Google Calendar holds the identifier and metadata. A narrow race remains possible if two genuinely different idempotency keys target the same slot between the final free/busy check and their inserts; Google Calendar does not provide an atomic free/busy-and-insert transaction.
+
+Rescheduling stores `vsAiLastMutationKey` and `vsAiLastMutationHash` in the same private metadata while preserving `vsAiSource` and the booking hash. The same key/request returns `duplicate: true` without another patch; the same key with a different target returns `duplicate_conflict`. Repeated cancellation returns `not_found_or_already_cancelled` after the event is gone. Fully durable cancellation idempotency is not possible without an external mutation ledger, which is intentionally out of scope.
 
 ## Environment
 
@@ -55,7 +68,7 @@ OPENAI_REALTIME_VOICE=marin
 OPENAI_LIVE_MODEL=gpt-live-1
 OPENAI_AGENT_MODEL=gpt-5.4-mini
 
-GOOGLE_CALENDAR_ID=<calendar ID or primary>
+GOOGLE_CALENDAR_ID=<dedicated VS Web Studio Booking calendar ID>
 GOOGLE_CLIENT_ID=<OAuth web client ID>
 GOOGLE_CLIENT_SECRET=<OAuth web client secret>
 GOOGLE_REFRESH_TOKEN=<offline refresh token>
@@ -81,7 +94,7 @@ The application can still start without Google values; Calendar tools then retur
    - `https://www.googleapis.com/auth/calendar.events`
    - `https://www.googleapis.com/auth/calendar.events.freebusy`
 7. Exchange the authorization code and copy the refresh token into `GOOGLE_REFRESH_TOKEN`.
-8. Set `GOOGLE_CALENDAR_ID` to `primary` for the authorized account’s primary calendar, or use the exact ID of another calendar that account can edit.
+8. Create a dedicated calendar named **VS Web Studio Booking** and set `GOOGLE_CALENDAR_ID` to its exact calendar ID. Do not use `primary` for production customer booking because personal busy events would block customer availability.
 9. Store all values only in local `.env` and the Netlify environment. Remove the Playground redirect URI afterward if it is no longer needed.
 
 ## Development and automated checks
@@ -90,12 +103,15 @@ The application can still start without Google values; Calendar tools then retur
 npm install
 npm run check:tools
 npm run check:calendar
+npm run check:google-calendar
 npm run typecheck
 npm run build
 npm run check:openai
 ```
 
-`check:calendar` uses a mock Google gateway. It never calls Google and never creates real events. It covers available/busy slots, alternatives, sanitized output, Berlin DST, working hours, buffers, explicit confirmation, duplicate keys, duplicate insertion prevention, and the pre-insert race check.
+`check:calendar` uses a mock Google gateway. It never calls Google and never creates real events. It covers booking behavior plus provider-filtered Emma lookup, zero/one/multiple candidates, sanitized results, ownership rejection, confirmation gates, available/busy reschedules, the immediate availability re-check, reschedule idempotency/conflicts, metadata preservation, cancellation, and repeated cancellation.
+
+`check:google-calendar` is a read-only live diagnostic. It reports only whether the four Google settings are present, OAuth authentication succeeds, the configured calendar is accessible, free/busy works, and the timezone is valid. It never prints IDs, credentials, tokens, or event data and never creates, updates, moves, or deletes events. If `GOOGLE_CALENDAR_ID` is `primary`, it prints a warning without failing the application.
 
 Run locally with:
 
@@ -125,6 +141,14 @@ Then manually test the voice sequence:
 6. Repeat the delegated booking call and verify no duplicate event.
 7. Make the slot busy between availability and confirmation and verify `slot_no_longer_available`.
 
+For the complete operator-only lifecycle flow, choose two free future weekday slots inside working hours and run:
+
+```bash
+npm run calendar:lifecycle-test -- --confirm-write --start=2026-09-25T15:00:00+02:00 --end=2026-09-25T15:30:00+02:00 --new-start=2026-09-28T14:00:00+02:00 --new-end=2026-09-28T14:30:00+02:00
+```
+
+Without `--confirm-write` the script refuses all writes. With the flag it creates **[TEST] VS Web Studio – AI Lifecycle**, verifies the Emma marker, finds it through the managed lookup, reschedules and verifies it, cancels it, and verifies it no longer exists. This is the only verification that touches a real Calendar; automated checks remain mocked.
+
 ## Netlify configuration
 
 In **Project configuration → Environment variables**, add every OpenAI and Google variable shown above except `PORT`. Add the Calendar policy variables if their defaults should be overridden. Never upload OAuth JSON files and never put secrets in `netlify.toml` or `public`.
@@ -142,9 +166,11 @@ Logs contain tool names, coarse statuses, and action types only. They do not con
 - Credentials and the real Google account are not automatically provisioned or tested.
 - The real Calendar write requires Vladyslav’s explicit manual integration test.
 - There is no atomic Google transaction combining free/busy checking with insertion for different booking keys.
-- No cancellation, rescheduling, recurring meetings, attendee invitations, conferencing links, or customer email notifications are implemented.
+- Recurring meetings cannot be modified; lifecycle operations intentionally reject them.
+- Cancellation idempotency cannot distinguish an already-cancelled event from a never-valid reference without an external mutation ledger.
+- Attendee invitations, conferencing links, and customer email notifications are not implemented.
 - Prepared callbacks and other Phase 4A actions remain non-persistent.
 
-## Recommended Phase 4C
+## Recommended next phase
 
-Add explicit rescheduling and cancellation for events created by Emma only, protected by the stored private source/idempotency metadata and customer confirmation. Do not expand into Gmail, CRM, or telephone calling in that phase.
+Manually verify the Phase 4C lifecycle script and voice flows in the deployed environment. After that, define Phase 5 separately; Gmail, CRM/Firebase, Twilio/SIP, bulk calling, and human call transfer remain explicitly out of scope here.

@@ -71,12 +71,21 @@ export const startLiveConversation = async ({
       "prepareNextStep",
       "getCalendarAvailability",
       "bookMeeting",
+      "findEmmaMeetings",
+      "rescheduleMeeting",
+      "cancelMeeting",
     ]);
     const isRegisteredTool = registeredTools.has(item.name);
     if (item.name === "getCalendarAvailability") {
       setToolActivity("Checking calendar");
     } else if (item.name === "bookMeeting") {
       setToolActivity("Booking requested");
+    } else if (item.name === "findEmmaMeetings") {
+      setToolActivity("Finding meeting");
+    } else if (item.name === "rescheduleMeeting") {
+      setToolActivity("Rescheduling");
+    } else if (item.name === "cancelMeeting") {
+      setToolActivity("Cancelling");
     } else if (item.name === "prepareNextStep") {
       setToolActivity("prepareNextStep requested");
     } else {
@@ -126,6 +135,23 @@ export const startLiveConversation = async ({
         result.externalActionPerformed === true
       ) {
         setToolActivity("Meeting confirmed");
+      } else if (result.status === "meeting_found") {
+        setToolActivity("Meeting found");
+      } else if (result.status === "multiple_meetings") {
+        setToolActivity("Clarification required");
+      } else if (result.status === "rescheduled") {
+        setToolActivity("Meeting rescheduled");
+      } else if (result.status === "cancelled") {
+        setToolActivity("Meeting cancelled");
+      } else if (
+        result.status === "no_meetings" ||
+        result.status === "not_found" ||
+        result.status === "not_found_or_already_cancelled" ||
+        result.status === "not_managed_by_emma" ||
+        result.status === "recurring_event_not_supported" ||
+        result.status === "confirmation_required"
+      ) {
+        setToolActivity("Clarification required");
       } else if (
         result.status === "calendar_error" ||
         result.status === "duplicate_conflict"

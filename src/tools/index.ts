@@ -1,17 +1,29 @@
 export {
   agentTools,
   bookMeetingToolDefinition,
+  cancelMeetingToolDefinition,
   executeAgentTool,
+  findEmmaMeetingsToolDefinition,
   getCalendarAvailabilityToolDefinition,
   prepareNextStepToolDefinition,
+  rescheduleMeetingToolDefinition,
 } from "./registry.js";
 export {
   bookMeeting,
   bookMeetingInputSchema,
+  cancelMeeting,
+  cancelMeetingInputSchema,
+  findEmmaMeetings,
+  findEmmaMeetingsInputSchema,
   getCalendarAvailability,
   getCalendarAvailabilityInputSchema,
+  rescheduleMeeting,
+  rescheduleMeetingInputSchema,
   type BookMeetingInput,
+  type CancelMeetingInput,
+  type FindEmmaMeetingsInput,
   type GetCalendarAvailabilityInput,
+  type RescheduleMeetingInput,
 } from "./calendar.js";
 export {
   prepareNextStep,

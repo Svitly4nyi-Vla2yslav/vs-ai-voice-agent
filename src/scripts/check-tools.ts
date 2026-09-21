@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 
 import {
+  agentTools,
+  cancelMeetingInputSchema,
   executeAgentTool,
+  findEmmaMeetingsInputSchema,
   prepareNextStep,
   prepareNextStepInputSchema,
+  rescheduleMeetingInputSchema,
 } from "../tools/index.js";
 
 const validInput = {
@@ -76,4 +80,36 @@ for (const input of actionInputs) {
   assert.equal(result.externalActionPerformed, false);
 }
 
-console.log("Tool checks passed (6 assertions/groups).");
+assert.deepEqual(
+  agentTools.map((tool) => tool.name),
+  [
+    "prepareNextStep",
+    "getCalendarAvailability",
+    "bookMeeting",
+    "findEmmaMeetings",
+    "rescheduleMeeting",
+    "cancelMeeting",
+  ],
+);
+assert.equal(findEmmaMeetingsInputSchema.safeParse({}).success, true);
+assert.equal(
+  rescheduleMeetingInputSchema.safeParse({
+    meetingRef: "emma_bWFuYWdlZC1ldmVudA",
+    newStart: "2026-09-28T14:00:00+02:00",
+    newEnd: "2026-09-28T14:30:00+02:00",
+    timezone: "Europe/Berlin",
+    confirmation: true,
+    idempotencyKey: "reschedule-test-1",
+  }).success,
+  true,
+);
+assert.equal(
+  cancelMeetingInputSchema.safeParse({
+    meetingRef: "emma_bWFuYWdlZC1ldmVudA",
+    confirmation: false,
+    idempotencyKey: "cancel-test-1",
+  }).success,
+  false,
+);
+
+console.log("Tool checks passed (registry, strict lifecycle schemas, and existing preparation behavior).");

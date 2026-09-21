@@ -3,8 +3,14 @@ import type { FunctionTool } from "openai/resources/live/live";
 import {
   bookMeeting,
   bookMeetingInputSchema,
+  cancelMeeting,
+  cancelMeetingInputSchema,
+  findEmmaMeetings,
+  findEmmaMeetingsInputSchema,
   getCalendarAvailability,
   getCalendarAvailabilityInputSchema,
+  rescheduleMeeting,
+  rescheduleMeetingInputSchema,
 } from "./calendar.js";
 import {
   prepareNextStep,
@@ -163,10 +169,72 @@ export const bookMeetingToolDefinition = {
   },
 } satisfies FunctionTool;
 
+export const findEmmaMeetingsToolDefinition = {
+  type: "function",
+  name: "findEmmaMeetings",
+  description:
+    "Find up to three sanitized candidate meetings created by Emma in a bounded date window. Use this before any reschedule or cancellation and clarify when multiple meetings are returned.",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      dateFrom: { type: ["string", "null"], description: "Optional YYYY-MM-DD lower bound." },
+      dateTo: { type: ["string", "null"], description: "Optional YYYY-MM-DD upper bound." },
+      contactName: nullableString,
+      companyName: nullableString,
+      approximateDate: { type: ["string", "null"], description: "Optional approximate YYYY-MM-DD date." },
+    },
+    required: ["dateFrom", "dateTo", "contactName", "companyName", "approximateDate"],
+  },
+} satisfies FunctionTool;
+
+export const rescheduleMeetingToolDefinition = {
+  type: "function",
+  name: "rescheduleMeeting",
+  description:
+    "Move one selected Emma-managed meeting after its new time was checked and the customer explicitly confirmed the exact change. Re-checks availability server-side before updating.",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      meetingRef: { type: "string", description: "Opaque reference returned by findEmmaMeetings." },
+      newStart: { type: "string", description: "Confirmed RFC3339 start with Europe/Berlin offset." },
+      newEnd: { type: "string", description: "Confirmed RFC3339 end with Europe/Berlin offset." },
+      timezone: { type: "string", enum: ["Europe/Berlin"] },
+      confirmation: { type: "boolean", enum: [true], description: "Must be true only after explicit final confirmation." },
+      idempotencyKey: { type: "string", description: "Stable key reused for retries of this exact change." },
+    },
+    required: ["meetingRef", "newStart", "newEnd", "timezone", "confirmation", "idempotencyKey"],
+  },
+} satisfies FunctionTool;
+
+export const cancelMeetingToolDefinition = {
+  type: "function",
+  name: "cancelMeeting",
+  description:
+    "Cancel one selected Emma-managed meeting only after the customer explicitly confirms cancellation.",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      meetingRef: { type: "string", description: "Opaque reference returned by findEmmaMeetings." },
+      confirmation: { type: "boolean", enum: [true], description: "Must be true only after explicit final confirmation." },
+      idempotencyKey: { type: "string", description: "Stable correlation key for the cancellation request." },
+    },
+    required: ["meetingRef", "confirmation", "idempotencyKey"],
+  },
+} satisfies FunctionTool;
+
 export const agentTools = [
   prepareNextStepToolDefinition,
   getCalendarAvailabilityToolDefinition,
   bookMeetingToolDefinition,
+  findEmmaMeetingsToolDefinition,
+  rescheduleMeetingToolDefinition,
+  cancelMeetingToolDefinition,
 ] satisfies FunctionTool[];
 
 const registeredToolNames = new Set(agentTools.map((tool) => tool.name));
@@ -225,11 +293,26 @@ export const executeAgentTool = async (
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
       result = await getCalendarAvailability(parsed.data);
-    } else {
+    } else if (name === "bookMeeting") {
       const parsed = bookMeetingInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
       result = await bookMeeting(parsed.data);
+    } else if (name === "findEmmaMeetings") {
+      const parsed = findEmmaMeetingsInputSchema.safeParse(argumentsValue);
+      if (!parsed.success) return failure("invalid_arguments");
+      console.info("[Agent Tool] validated", { tool: name });
+      result = await findEmmaMeetings(parsed.data);
+    } else if (name === "rescheduleMeeting") {
+      const parsed = rescheduleMeetingInputSchema.safeParse(argumentsValue);
+      if (!parsed.success) return failure("invalid_arguments");
+      console.info("[Agent Tool] validated", { tool: name });
+      result = await rescheduleMeeting(parsed.data);
+    } else {
+      const parsed = cancelMeetingInputSchema.safeParse(argumentsValue);
+      if (!parsed.success) return failure("invalid_arguments");
+      console.info("[Agent Tool] validated", { tool: name });
+      result = await cancelMeeting(parsed.data);
     }
 
     console.info("[Agent Tool] completed", {

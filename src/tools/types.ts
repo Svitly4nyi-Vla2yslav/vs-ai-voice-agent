@@ -49,8 +49,14 @@ export type AgentToolResult =
   | PrepareNextStepResult
   | AvailabilityResult
   | BookingResult
+  | FindEmmaMeetingsResult
+  | RescheduleMeetingResult
+  | CancelMeetingResult
   | ToolFailureResult;
 import type {
   AvailabilityResult,
   BookingResult,
+  CancelMeetingResult,
+  FindEmmaMeetingsResult,
+  RescheduleMeetingResult,
 } from "../services/google-calendar.js";

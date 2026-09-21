@@ -6,6 +6,18 @@ const server = app.listen(env.PORT, () => {
 });
 
 server.on("error", (error) => {
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "EADDRINUSE"
+  ) {
+    console.error(
+      `Port ${env.PORT} is already in use. Stop the existing development server before starting another instance.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
   console.error("Server failed to start", error);
   process.exitCode = 1;
 });
