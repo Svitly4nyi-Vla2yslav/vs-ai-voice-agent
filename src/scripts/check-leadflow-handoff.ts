@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { syncLeadFlowInteractionInputSchema } from "../contracts/leadflow.js";
+import {
+  leadFlowHandoffResponseSchema,
+  syncLeadFlowInteractionInputSchema,
+} from "../contracts/leadflow.js";
 import {
   createLeadFlowSessionToken,
   readLeadFlowSessionToken,
@@ -21,6 +24,66 @@ const resolvedLead = {
     crmStatus: "CONTACTED" as const,
   },
 };
+
+const requiredLeadFields = {
+  id: "canonical-lead-123",
+  company: "Muster GmbH",
+  crmStatus: "CONTACTED" as const,
+};
+
+const populatedContacts = leadFlowHandoffResponseSchema.parse(resolvedLead);
+assert.deepEqual(populatedContacts.lead, resolvedLead.lead);
+
+const nullContacts = leadFlowHandoffResponseSchema.parse({
+  ok: true,
+  lead: {
+    ...requiredLeadFields,
+    contactPerson: null,
+    phone: null,
+    email: null,
+  },
+});
+assert.deepEqual(
+  {
+    contactPerson: nullContacts.lead.contactPerson,
+    phone: nullContacts.lead.phone,
+    email: nullContacts.lead.email,
+  },
+  { contactPerson: null, phone: null, email: null },
+  "explicit null contact fields remain null",
+);
+
+const omittedContacts = leadFlowHandoffResponseSchema.parse({
+  ok: true,
+  lead: requiredLeadFields,
+});
+assert.deepEqual(
+  {
+    contactPerson: omittedContacts.lead.contactPerson,
+    phone: omittedContacts.lead.phone,
+    email: omittedContacts.lead.email,
+  },
+  { contactPerson: null, phone: null, email: null },
+  "omitted contact fields normalize to null",
+);
+
+assert.equal(
+  leadFlowHandoffResponseSchema.safeParse({
+    ok: true,
+    lead: { ...requiredLeadFields, email: "not-an-email" },
+  }).success,
+  false,
+  "invalid present email is rejected",
+);
+for (const requiredField of ["id", "company", "crmStatus"] as const) {
+  const lead = { ...requiredLeadFields } as Record<string, unknown>;
+  delete lead[requiredField];
+  assert.equal(
+    leadFlowHandoffResponseSchema.safeParse({ ok: true, lead }).success,
+    false,
+    `missing ${requiredField} is rejected`,
+  );
+}
 
 let capturedAuthorization = "";
 let capturedRequestBody: unknown;

@@ -36,8 +36,9 @@ leadFlowRouter.post("/api/leadflow/handoff", async (request, response) => {
     parsed.data.handoffToken,
   );
   if (!result.ok || !env.LEADFLOW_INTEGRATION_TOKEN) {
-    console.info("[LeadFlow] handoff failed", {
-      reason: result.ok ? "configuration_missing" : result.error,
+    const safeReason = result.ok ? "configuration_missing" : result.error;
+    console.info("[LeadFlow] handoff resolution failed", {
+      reason: safeReason,
     });
     response.status(401).json({ error: "LeadFlow connection failed" });
     return;

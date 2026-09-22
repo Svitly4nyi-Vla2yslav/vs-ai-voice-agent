@@ -252,7 +252,23 @@ export const leadFlowSuccessResponseSchema = z
 
 export type LeadFlowSuccessResponse = z.infer<typeof leadFlowSuccessResponseSchema>;
 
-const nullableContactText = z.string().trim().min(1).max(500).nullable();
+const optionalContactText = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .nullable()
+  .optional()
+  .transform((value) => value ?? null);
+
+const optionalContactEmail = z
+  .string()
+  .trim()
+  .email()
+  .max(254)
+  .nullable()
+  .optional()
+  .transform((value) => value ?? null);
 
 export const leadFlowHandoffResponseSchema = z
   .object({
@@ -261,9 +277,9 @@ export const leadFlowHandoffResponseSchema = z
       .object({
         id: boundedText(200),
         company: boundedText(500),
-        contactPerson: nullableContactText,
-        phone: nullableContactText,
-        email: z.string().trim().email().max(254).nullable(),
+        contactPerson: optionalContactText,
+        phone: optionalContactText,
+        email: optionalContactEmail,
         crmStatus: z.enum([
           "NEW",
           "AUDITED",
