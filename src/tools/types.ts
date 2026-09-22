@@ -53,6 +53,7 @@ export type AgentToolResult =
   | RescheduleMeetingResult
   | CancelMeetingResult
   | UpdateMeetingDetailsResult
+  | SyncLeadFlowInteractionResult
   | ToolFailureResult;
 import type {
   AvailabilityResult,
@@ -62,3 +63,4 @@ import type {
   RescheduleMeetingResult,
   UpdateMeetingDetailsResult,
 } from "../services/google-calendar.js";
+import type { SyncLeadFlowInteractionResult } from "./leadflow.js";

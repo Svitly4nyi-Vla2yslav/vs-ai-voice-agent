@@ -1,0 +1,45 @@
+import { syncLeadFlowInteractionInputSchema, type SyncLeadFlowInteractionInput } from "../contracts/leadflow.js";
+import { getLeadFlowClient, type LeadFlowErrorCode } from "../services/leadflow.js";
+
+export { syncLeadFlowInteractionInputSchema };
+export type { SyncLeadFlowInteractionInput };
+
+export type SyncLeadFlowInteractionResult =
+  | {
+      status: "synced" | "duplicate_accepted";
+      externalActionPerformed: true;
+    }
+  | {
+      status: "leadflow_error";
+      reason: LeadFlowErrorCode;
+      externalActionPerformed: false;
+    };
+
+export const syncLeadFlowInteraction = async (
+  input: SyncLeadFlowInteractionInput,
+  leadId: string | undefined,
+): Promise<SyncLeadFlowInteractionResult> => {
+  if (!leadId) {
+    return {
+      status: "leadflow_error",
+      reason: "invalid_payload",
+      externalActionPerformed: false,
+    };
+  }
+  const result = await getLeadFlowClient().send(leadId, input);
+  if (!result.ok) {
+    console.info("[LeadFlow] sync failed", { reason: result.error });
+    return {
+      status: "leadflow_error",
+      reason: result.error,
+      externalActionPerformed: false,
+    };
+  }
+  console.info("[LeadFlow] sync completed", {
+    duplicate: result.data.duplicate,
+  });
+  return {
+    status: result.data.duplicate ? "duplicate_accepted" : "synced",
+    externalActionPerformed: true,
+  };
+};

@@ -21,7 +21,8 @@ main {
   margin: 1.5rem 0;
 }
 
-select {
+select,
+input[type="text"] {
   padding: 0.5rem;
   font: inherit;
 }
@@ -56,6 +57,10 @@ button {
 #model,
 #output-volume-value,
 #tool-activity {
+  font-weight: 600;
+}
+
+#leadflow-status {
   font-weight: 600;
 }
 

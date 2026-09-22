@@ -91,6 +91,7 @@ assert.deepEqual(
     "rescheduleMeeting",
     "cancelMeeting",
     "updateMeetingDetails",
+    "syncLeadFlowInteraction",
   ],
 );
 assert.equal(findEmmaMeetingsInputSchema.safeParse({}).success, true);
@@ -121,4 +122,24 @@ assert.equal(
   true,
 );
 
-console.log("Tool checks passed (registry, strict lifecycle schemas, and existing preparation behavior).");
+const missingLeadContext = await executeAgentTool("syncLeadFlowInteraction", {
+  outcome: "CALL_COMPLETED",
+  summary: "Kunde bestätigte einen nächsten Schritt.",
+});
+assert.deepEqual(missingLeadContext, {
+  status: "leadflow_error",
+  reason: "invalid_payload",
+  externalActionPerformed: false,
+});
+const forbiddenCrmStatus = await executeAgentTool("syncLeadFlowInteraction", {
+  outcome: "CALL_COMPLETED",
+  summary: "Kunde bestätigte einen nächsten Schritt.",
+  crmStatus: "WON",
+});
+assert.deepEqual(forbiddenCrmStatus, {
+  status: "tool_error",
+  error: "invalid_arguments",
+  externalActionPerformed: false,
+});
+
+console.log("Tool checks passed (registry, strict lifecycle/LeadFlow schemas, and existing preparation behavior).");

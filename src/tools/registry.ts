@@ -18,6 +18,10 @@ import {
   prepareNextStep,
   prepareNextStepInputSchema,
 } from "./prepare-next-step.js";
+import {
+  syncLeadFlowInteraction,
+  syncLeadFlowInteractionInputSchema,
+} from "./leadflow.js";
 import type { AgentToolResult } from "./types.js";
 
 const nullableString = { type: ["string", "null"] } as const;
@@ -286,6 +290,60 @@ export const updateMeetingDetailsToolDefinition = {
   },
 } satisfies FunctionTool;
 
+export const syncLeadFlowInteractionToolDefinition = {
+  type: "function",
+  name: "syncLeadFlowInteraction",
+  description:
+    "Persist one meaningful, confirmed outbound-call interaction in LeadFlow. Report facts only; never choose a CRM status. The operator-provided lead ID is server context and is never an argument or a customer question.",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      outcome: { type: "string", enum: ["NO_ANSWER", "CALL_COMPLETED", "CALLBACK_REQUESTED", "MEETING_BOOKED", "SEND_INFORMATION_REQUESTED", "HUMAN_HANDOFF_REQUESTED", "NOT_INTERESTED", "DO_NOT_CONTACT"] },
+      summary: { type: "string", description: "Concise factual German summary without transcript or unsupported assumptions." },
+      nextAction: {
+        type: ["object", "null"],
+        additionalProperties: false,
+        properties: {
+          type: { type: "string", enum: ["NONE", "CALLBACK", "FOLLOW_UP", "MEETING", "SEND_INFORMATION", "HUMAN_HANDOFF"] },
+          confirmed: { type: "boolean" },
+          dueAt: nullableString,
+          note: nullableString,
+        },
+        required: ["type", "confirmed", "dueAt", "note"],
+      },
+      followUp: {
+        type: ["object", "null"],
+        additionalProperties: false,
+        properties: {
+          requested: { type: "boolean" },
+          confirmed: { type: "boolean" },
+          date: nullableString,
+          dueAt: nullableString,
+          timeWindow: nullableString,
+          reason: nullableString,
+        },
+        required: ["requested", "confirmed", "date", "dueAt", "timeWindow", "reason"],
+      },
+      calendar: {
+        type: ["object", "null"],
+        additionalProperties: false,
+        properties: {
+          confirmed: { type: "boolean", enum: [true] },
+          eventId: nullableString,
+          start: nullableString,
+          end: nullableString,
+          meetingMode: { type: ["string", "null"], enum: ["GOOGLE_MEET", "PHONE", "IN_PERSON", null] },
+        },
+        required: ["confirmed", "eventId", "start", "end", "meetingMode"],
+      },
+      lostReason: { type: ["string", "null"], enum: ["kein Bedarf", "kein Budget", "keine Antwort nach Follow-ups", "eigene Agentur / interner Entwickler", "Konzern / keine lokale Entscheidungsbefugnis", "Geschäft nicht mehr aktiv", "falsche Zielgruppe", "sonstiger Grund", null] },
+    },
+    required: ["outcome", "summary", "nextAction", "followUp", "calendar", "lostReason"],
+  },
+} satisfies FunctionTool;
+
 export const agentTools = [
   prepareNextStepToolDefinition,
   getCalendarAvailabilityToolDefinition,
@@ -294,6 +352,7 @@ export const agentTools = [
   rescheduleMeetingToolDefinition,
   cancelMeetingToolDefinition,
   updateMeetingDetailsToolDefinition,
+  syncLeadFlowInteractionToolDefinition,
 ] satisfies FunctionTool[];
 
 const registeredToolNames = new Set(agentTools.map((tool) => tool.name));
@@ -314,6 +373,7 @@ const failure = (
 export const executeAgentTool = async (
   name: string,
   rawArguments: unknown,
+  context: { leadId?: string | undefined } = {},
 ): Promise<AgentToolResult> => {
   const safeToolName = registeredToolNames.has(name) ? name : "unknown";
   console.info("[Agent Tool] requested", { tool: safeToolName });
@@ -372,11 +432,16 @@ export const executeAgentTool = async (
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
       result = await cancelMeeting(parsed.data);
-    } else {
+    } else if (name === "updateMeetingDetails") {
       const parsed = updateMeetingDetailsInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
       result = await updateMeetingDetails(parsed.data);
+    } else {
+      const parsed = syncLeadFlowInteractionInputSchema.safeParse(argumentsValue);
+      if (!parsed.success) return failure("invalid_arguments");
+      console.info("[Agent Tool] validated", { tool: name });
+      result = await syncLeadFlowInteraction(parsed.data, context.leadId);
     }
 
     console.info("[Agent Tool] completed", {

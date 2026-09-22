@@ -10,6 +10,8 @@ const modelElement = document.querySelector("#model");
 const outputVolumeSlider = document.querySelector("#output-volume");
 const outputVolumeValue = document.querySelector("#output-volume-value");
 const toolActivityElement = document.querySelector("#tool-activity");
+const leadFlowLeadIdInput = document.querySelector("#leadflow-lead-id");
+const leadFlowStatusElement = document.querySelector("#leadflow-status");
 
 const DEFAULT_OUTPUT_VOLUME = 70;
 const OUTPUT_VOLUME_STORAGE_KEY = "vs-voice-agent-output-volume";
@@ -45,6 +47,22 @@ const setStatus = (message) => {
 
 const setToolActivity = (message) => {
   toolActivityElement.textContent = message;
+};
+
+const setLeadFlowStatus = (message) => {
+  leadFlowStatusElement.textContent = message;
+};
+
+const loadLeadFlowStatus = async () => {
+  try {
+    const response = await fetch("/api/tools/leadflow-status", {
+      headers: { Accept: "application/json" },
+    });
+    const body = response.ok ? await response.json() : null;
+    setLeadFlowStatus(body?.configured === true ? "Ready" : "Not configured");
+  } catch {
+    setLeadFlowStatus("Not configured");
+  }
 };
 
 const readStoredOutputVolume = () => {
@@ -144,6 +162,7 @@ const cleanup = () => {
   remoteAudio.srcObject = null;
   modeSelect.disabled = false;
   voiceSelect.disabled = false;
+  leadFlowLeadIdInput.disabled = false;
   startButton.disabled = false;
   endButton.disabled = true;
 };
@@ -181,10 +200,18 @@ const startConversation = async () => {
     return;
   }
 
+  const leadId = leadFlowLeadIdInput.value.trim();
+  if (!leadId) {
+    setStatus("Enter the operator LeadFlow Lead ID before starting.");
+    leadFlowLeadIdInput.focus();
+    return;
+  }
+
   startButton.disabled = true;
   endButton.disabled = false;
   modeSelect.disabled = true;
   voiceSelect.disabled = true;
+  leadFlowLeadIdInput.disabled = true;
   const currentAttempt = ++connectionAttempt;
   const selectedMode = modeSelect.value;
   const selectedVoice = voiceSelect.value;
@@ -199,6 +226,8 @@ const startConversation = async () => {
         remoteAudio,
         setStatus,
         setToolActivity,
+        setLeadFlowStatus,
+        leadId,
         signal: abortController.signal,
       });
 
@@ -353,5 +382,6 @@ outputVolumeSlider.addEventListener("input", () => {
 
 modelElement.textContent = modeModels[modeSelect.value];
 applyOutputVolume(readStoredOutputVolume());
+void loadLeadFlowStatus();
 
 window.addEventListener("beforeunload", cleanup);

@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Phase 4D – Client-First Booking Experience.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback remains `gpt-realtime-2.1-mini`.
+**Phase 5B – LeadFlow Sender Integration.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback remains `gpt-realtime-2.1-mini`; all Phase 4D Calendar lifecycle behavior is preserved.
 
 The registered backend tools are:
 
@@ -13,14 +13,27 @@ The registered backend tools are:
 - `rescheduleMeeting` — updates one selected Emma event only after availability is re-checked and the exact change is explicitly confirmed.
 - `cancelMeeting` — deletes one selected Emma event only after explicit cancellation confirmation.
 - `updateMeetingDetails` — updates context or meeting mode without changing appointment time.
+- `syncLeadFlowInteraction` — sends one validated, confirmed interaction fact to LeadFlow without selecting a CRM status.
 
-Callbacks are not Calendar meetings. Gmail, email sending, CRM, Firebase, LeadFlow, Twilio, SIP, calls, and human telephone transfer remain unimplemented.
+Callbacks are not Calendar meetings. LeadFlow writeback is implemented; LeadFlow remains the authoritative CRM and alone decides status transitions. Gmail, email sending, Firebase, Twilio, SIP, real calls, automatic lead dialing, lead creation, fuzzy lookup, bulk calling, and human telephone transfer remain unimplemented.
 
 ## Architecture
 
 Live uses a server-owned Responses delegation configured in the existing session. The browser relays completed function calls to `POST /api/tools/execute`; the shared Express/Netlify backend performs allowlist checks, Zod validation, Google authentication, availability calculation, and event creation. The browser contains no Google or OpenAI credentials and no business execution logic.
 
 Google access uses one-user OAuth 2.0 offline credentials: client ID, client secret, and refresh token. The official Google client refreshes access tokens as necessary. This is suitable for one calendar controlled by Vladyslav and works in stateless Netlify Functions without credential files or multi-user OAuth infrastructure.
+
+## LeadFlow server-to-server writeback
+
+The browser never receives `LEADFLOW_INTEGRATION_TOKEN`. It relays only a tool name, model-produced non-secret interaction facts, and the operator-entered LeadFlow lead ID to the existing same-origin `/api/tools/execute` route. The Express/Netlify backend validates the request again, generates the UUID event ID and sends `VoiceAgentInteractionV1` to `POST /api/integrations/voice-agent/interactions` with server-side Bearer authentication.
+
+LeadFlow remains the authoritative CRM. The sender contract contains no requested CRM status, and the strict tool schema rejects `crmStatus`, `crmStatusAfter`, `status`, `stage`, and every other unknown field. Emma reports confirmed facts only and normally does not expose LeadFlow's internal before/after status names.
+
+The development UI requires an operator-only **LeadFlow Lead ID** before the conversation starts. It is separate from spoken input, is not an argument the model can invent, and must never be requested from the customer. A future telephony integration should inject this ID automatically from the LeadFlow record selected for the call. The UI shows only `Not configured`, `Ready`, `Syncing`, `Synced`, `Duplicate accepted`, `Lead not found`, or `Sync error`.
+
+One logical writeback receives one application-generated UUID. A transport retry reuses the exact payload and UUID. An equivalent LeadFlow replay with `duplicate: true` is successful; `409 event_conflict` is controlled and never retried or rewritten under that UUID. Authentication, missing configuration, timeout, unavailability, missing lead, invalid evidence, malformed response, and generic provider errors are returned as sanitized categories. Tokens, raw provider bodies, stack traces, and CRM status values are not returned to the browser.
+
+Writeback happens once when a meaningful result is confirmed, not per utterance. A callback uses `CALLBACK_REQUESTED` only with `followUp.requested=true`, `confirmed=true`, and an unambiguous `date` or `dueAt`; LeadFlow decides whether that evidence changes CRM status. A meeting uses `MEETING_BOOKED` only after Google returns `bookMeeting status=confirmed`; `calendar.eventId`, `start`, `end`, and `meetingMode` are copied from that verified result. Unconfirmed meetings are rejected by the sender schema.
 
 ## Calendar behavior
 
@@ -80,15 +93,18 @@ GOOGLE_CLIENT_ID=<OAuth web client ID>
 GOOGLE_CLIENT_SECRET=<OAuth web client secret>
 GOOGLE_REFRESH_TOKEN=<offline refresh token>
 
+LEADFLOW_BASE_URL=http://localhost:3001
+LEADFLOW_INTEGRATION_TOKEN=<server-side shared secret>
+
 CALENDAR_TIMEZONE=Europe/Berlin
 CALENDAR_WORKING_HOURS_START=09:00
 CALENDAR_WORKING_HOURS_END=17:00
 CALENDAR_DEFAULT_DURATION_MINUTES=30
 CALENDAR_BUFFER_MINUTES=30
-PORT=3001
+PORT=3002
 ```
 
-The application can still start without Google values; Calendar tools then return a sanitized `calendar_error` with reason `configuration`. All four Google variables are required before Calendar integration can work.
+The application can still start without Google or LeadFlow values. Calendar tools then return a sanitized configuration error; LeadFlow shows `Not configured` and refuses writeback without claiming success. All four Google variables are required for Calendar, and both LeadFlow variables are required for CRM writeback.
 
 ## One-time Google setup
 
@@ -111,6 +127,7 @@ npm install
 npm run check:tools
 npm run check:calendar
 npm run check:google-calendar
+npm run check:leadflow
 npm run typecheck
 npm run build
 npm run check:openai
@@ -126,7 +143,19 @@ Run locally with:
 npm run dev
 ```
 
-Verify `GET http://localhost:3001/health`, then use the browser Voice Quality Lab.
+Run LeadFlow at `http://localhost:3001` and this Voice Agent at `http://localhost:3002`; fixed separate ports avoid `EADDRINUSE`. Verify `GET http://localhost:3002/health`, then use the browser Voice Quality Lab.
+
+`check:leadflow` is fully mocked and never calls LeadFlow. It covers a valid request, server-side Authorization, secret-safe logging, timeout, 401, 404, 400, 409 without unsafe retry, duplicate acceptance, malformed responses, UTF-8 summaries, forbidden CRM status fields, stable event IDs across transport retry, new IDs for new interactions, verified Calendar mapping, and rejection of unconfirmed meetings.
+
+## Manual LeadFlow integration test
+
+Start LeadFlow locally on port 3001, set `LEADFLOW_BASE_URL` and `LEADFLOW_INTEGRATION_TOKEN` in the Voice Agent `.env`, and copy a real canonical lead ID from LeadFlow. Then run:
+
+```bash
+npm run leadflow:test -- --lead-id=<canonical-lead-id> --confirm-write
+```
+
+The script refuses to write unless both flags are present, sends one German UTF-8 `CALL_COMPLETED` interaction, and never prints the token. It performs a real CRM write, so use a development lead. Automated tests do not call LeadFlow. Do not consider the real integration verified until Vladyslav performs this manual end-to-end test.
 
 ## Explicit manual Calendar test
 
@@ -171,7 +200,7 @@ Google Appointment Schedule is separate from Emma's API flow and is not required
 
 ## Netlify configuration
 
-In **Project configuration → Environment variables**, add every OpenAI and Google variable shown above except `PORT`. Add the Calendar policy variables if their defaults should be overridden. Never upload OAuth JSON files and never put secrets in `netlify.toml` or `public`.
+In **Project configuration → Environment variables**, add every OpenAI, Google, and LeadFlow variable shown above except `PORT`. `LEADFLOW_BASE_URL` must be the deployed LeadFlow origin. `LEADFLOW_INTEGRATION_TOKEN` must exactly match LeadFlow's production `VOICE_AGENT_INTEGRATION_TOKEN`; mark it secret in Netlify. Add the Calendar policy variables if their defaults should be overridden. Never upload OAuth JSON files and never put secrets in `netlify.toml` or `public`.
 
 After saving the variables, trigger a new deploy. Verify `/health`, then run the browser voice scenarios against the deployed origin. Netlify Functions need outbound HTTPS access to Google APIs, which is part of normal Netlify operation.
 
@@ -191,8 +220,10 @@ Logs contain tool names, coarse statuses, and action types only. They do not con
 - Google Meet generation depends on the configured account/calendar supporting `hangoutsMeet`; a confirmed URL can remain temporarily absent while Google processes the asynchronous request.
 - The browser has no verified current caller number, so phone meetings require the customer to provide and confirm a callback number.
 - Attendee invitations and customer email notifications are not implemented.
-- Prepared callbacks and other Phase 4A actions remain non-persistent.
+- A callback writeback records confirmed facts in LeadFlow, but LeadFlow alone decides whether the evidence changes CRM status.
+- The browser operator must currently paste the canonical LeadFlow lead ID; there is no lookup or phone-number matching.
+- Real LeadFlow connectivity is not proven by automated tests and requires Vladyslav's explicit manual integration test.
 
-## Recommended next phase
+## Recommended Phase 5C
 
-Manually verify the Phase 4D booking-mode, buffer, customer-priority, and details-update scenarios in the deployed environment. After that, define the next business phase separately; Gmail, CRM/Firebase, Twilio/SIP, bulk calling, and human call transfer remain explicitly out of scope here.
+First perform the manual local and deployed Phase 5B writeback test, including a duplicate replay and a confirmed Google Calendar booking. Phase 5C should then inject the canonical lead ID from an operator-selected LeadFlow record or authenticated call-session handoff, removing manual paste while preserving server-side token isolation and LeadFlow authority. Twilio/SIP, automatic dialing, fuzzy matching, bulk calling, Gmail sending, and lead creation should remain separate explicitly authorized phases.

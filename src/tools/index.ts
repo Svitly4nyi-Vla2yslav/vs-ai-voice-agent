@@ -8,6 +8,7 @@ export {
   prepareNextStepToolDefinition,
   rescheduleMeetingToolDefinition,
   updateMeetingDetailsToolDefinition,
+  syncLeadFlowInteractionToolDefinition,
 } from "./registry.js";
 export {
   bookMeeting,
@@ -34,6 +35,12 @@ export {
   prepareNextStepInputSchema,
   type PrepareNextStepInput,
 } from "./prepare-next-step.js";
+export {
+  syncLeadFlowInteraction,
+  syncLeadFlowInteractionInputSchema,
+  type SyncLeadFlowInteractionInput,
+  type SyncLeadFlowInteractionResult,
+} from "./leadflow.js";
 export type {
   AgentToolResult,
   NextStepAction,

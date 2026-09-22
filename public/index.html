@@ -41,6 +41,15 @@
           />
           <output id="output-volume-value" for="output-volume">70%</output>
         </div>
+
+        <label for="leadflow-lead-id">LeadFlow Lead ID</label>
+        <input
+          id="leadflow-lead-id"
+          type="text"
+          maxlength="200"
+          autocomplete="off"
+          placeholder="Operator context"
+        />
       </div>
 
       <div class="controls">
@@ -52,6 +61,10 @@
       <p class="tool-activity">
         Last tool activity:
         <strong id="tool-activity" role="status" aria-live="polite">None</strong>
+      </p>
+      <p class="tool-activity">
+        LeadFlow:
+        <strong id="leadflow-status" role="status" aria-live="polite">Not configured</strong>
       </p>
       <audio id="remote-audio" autoplay playsinline></audio>
     </main>

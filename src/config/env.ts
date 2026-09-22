@@ -38,6 +38,8 @@ const environmentSchema = z.object({
   GOOGLE_CLIENT_ID: optionalEnvironmentValue,
   GOOGLE_CLIENT_SECRET: optionalEnvironmentValue,
   GOOGLE_REFRESH_TOKEN: optionalEnvironmentValue,
+  LEADFLOW_BASE_URL: optionalEnvironmentValue,
+  LEADFLOW_INTEGRATION_TOKEN: optionalEnvironmentValue,
   CALENDAR_TIMEZONE: z.literal("Europe/Berlin").default("Europe/Berlin"),
   CALENDAR_WORKING_HOURS_START: z
     .string()
@@ -59,7 +61,7 @@ const environmentSchema = z.object({
     .min(0)
     .max(120)
     .default(30),
-  PORT: z.coerce.number().int().min(1).max(65_535).default(3001),
+  PORT: z.coerce.number().int().min(1).max(65_535).default(3002),
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);

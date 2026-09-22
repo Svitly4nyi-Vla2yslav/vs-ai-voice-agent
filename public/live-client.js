@@ -36,6 +36,8 @@ export const startLiveConversation = async ({
   remoteAudio,
   setStatus,
   setToolActivity,
+  setLeadFlowStatus,
+  leadId,
   signal,
 }) => {
   let connection;
@@ -75,6 +77,7 @@ export const startLiveConversation = async ({
       "rescheduleMeeting",
       "cancelMeeting",
       "updateMeetingDetails",
+      "syncLeadFlowInteraction",
     ]);
     const isRegisteredTool = registeredTools.has(item.name);
     if (item.name === "getCalendarAvailability") {
@@ -91,6 +94,9 @@ export const startLiveConversation = async ({
       setToolActivity("Updating meeting details");
     } else if (item.name === "prepareNextStep") {
       setToolActivity("prepareNextStep requested");
+    } else if (item.name === "syncLeadFlowInteraction") {
+      setToolActivity("LeadFlow syncing");
+      setLeadFlowStatus("Syncing");
     } else {
       setToolActivity("Tool error");
     }
@@ -106,6 +112,7 @@ export const startLiveConversation = async ({
         body: JSON.stringify({
           name: item.name,
           arguments: item.arguments,
+          context: { leadId },
         }),
         signal,
       });
@@ -148,6 +155,21 @@ export const startLiveConversation = async ({
         setToolActivity("Meeting cancelled");
       } else if (result.status === "details_updated") {
         setToolActivity("Meeting details updated");
+      } else if (result.status === "synced") {
+        setToolActivity("LeadFlow synced");
+        setLeadFlowStatus("Synced");
+      } else if (result.status === "duplicate_accepted") {
+        setToolActivity("LeadFlow duplicate accepted");
+        setLeadFlowStatus("Duplicate accepted");
+      } else if (result.status === "leadflow_error") {
+        setToolActivity("LeadFlow sync error");
+        setLeadFlowStatus(
+          result.reason === "lead_not_found"
+            ? "Lead not found"
+            : result.reason === "configuration_missing"
+              ? "Not configured"
+              : "Sync error",
+        );
       } else if (
         result.status === "no_meetings" ||
         result.status === "not_found" ||
