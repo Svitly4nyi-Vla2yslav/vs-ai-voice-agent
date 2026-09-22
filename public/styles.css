@@ -68,6 +68,20 @@ button {
   margin-top: 0.5rem;
 }
 
+.leadflow-context,
+.leadflow-dev-fallback {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 0.4rem;
+}
+
+[hidden] {
+  display: none !important;
+}
+
 @media (max-width: 32rem) {
   .settings {
     grid-template-columns: 1fr;

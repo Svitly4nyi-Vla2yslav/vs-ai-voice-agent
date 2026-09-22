@@ -2,13 +2,13 @@ const LEADFLOW_AGENT_INSTRUCTIONS = `
 LEADFLOW-WRITEBACK
 Synchronisiere genau einmal, wenn ein sinnvoller, bestaetigter Gespraechsausgang feststeht, nicht fuer Zwischensaetze oder Klaerungsfragen. Sende nur bestaetigte Fakten und eine knappe sachliche deutsche Zusammenfassung. Waehle oder fordere niemals einen CRM-Status; LeadFlow bleibt dafuer allein zustaendig.
 
-Frage Kunden niemals nach einer LeadFlow Lead ID und sprich sie nicht aus. Sie stammt ausschliesslich aus Operator- oder Systemkontext. CALLBACK_REQUESTED darf nur mit einem bestaetigten Follow-up-Datum oder dueAt synchronisiert werden. MEETING_BOOKED darf erst nach bookMeeting status=confirmed und externalActionPerformed=true synchronisiert werden; uebernimm calendarEventId, start, end und meetingMode exakt aus dem bestaetigten Tool-Ergebnis.
+Frage Kunden niemals nach einer LeadFlow Lead ID und sprich sie nicht aus. Sie stammt ausschliesslich aus einem serverseitig verifizierten LeadFlow-Handoff oder explizitem Entwicklerkontext. Erwaehne oder offenbare niemals CRM-Status, interne Lead IDs, Integrations-Tokens, Handoff-Tokens oder Session-Tokens. CALLBACK_REQUESTED darf nur mit einem bestaetigten Follow-up-Datum oder dueAt synchronisiert werden. MEETING_BOOKED darf erst nach bookMeeting status=confirmed und externalActionPerformed=true synchronisiert werden; uebernimm calendarEventId, start, end und meetingMode exakt aus dem bestaetigten Tool-Ergebnis.
 
 Bei LeadFlow-Fehlern behaupte keine Speicherung. Nur bei syncLeadFlowInteraction status=synced oder status=duplicate_accepted und externalActionPerformed=true darfst du knapp sagen: "Die Gespraechsinformationen wurden im System gespeichert." Nenne Kunden keine internen CRM-Statusnamen.
 `.trim();
 
 const LEADFLOW_BACKEND_INSTRUCTIONS = `
-Nutze syncLeadFlowInteraction nur fuer einen sinnvollen bestaetigten Gespraechsausgang, nicht fuer jede Aussage. Das Tool erhaelt die Lead ID ausschliesslich aus Serverkontext; fordere sie nie als Argument an und frage den Kunden nie danach. Sende niemals crmStatus, crmStatusAfter, status oder stage. LeadFlow entscheidet den CRM-Status.
+Nutze syncLeadFlowInteraction nur fuer einen sinnvollen bestaetigten Gespraechsausgang, nicht fuer jede Aussage. Das Tool erhaelt die kanonische Lead ID ausschliesslich aus verifiziertem Serverkontext; fordere sie nie als Argument an, erfinde sie nie und frage den Kunden nie danach. Sende niemals crmStatus, crmStatusAfter, status oder stage. LeadFlow besitzt und erzeugt Lead IDs und entscheidet den CRM-Status.
 
 CALLBACK_REQUESTED erfordert bestaetigte Follow-up-Daten. MEETING_BOOKED erfordert zuvor ein erfolgreiches bookMeeting und exakt dessen calendarEventId, start, end und meetingMode. Nur synced oder duplicate_accepted mit externalActionPerformed=true bestaetigt die Speicherung; bei leadflow_error oder tool_error behaupte keinen Erfolg.
 `.trim();

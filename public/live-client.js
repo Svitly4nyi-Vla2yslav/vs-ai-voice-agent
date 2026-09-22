@@ -37,7 +37,7 @@ export const startLiveConversation = async ({
   setStatus,
   setToolActivity,
   setLeadFlowStatus,
-  leadId,
+  leadFlowContext,
   signal,
 }) => {
   let connection;
@@ -112,7 +112,7 @@ export const startLiveConversation = async ({
         body: JSON.stringify({
           name: item.name,
           arguments: item.arguments,
-          context: { leadId },
+          context: leadFlowContext,
         }),
         signal,
       });
@@ -317,7 +317,13 @@ export const startLiveConversation = async ({
         Accept: "application/sdp",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ sdp, voice }),
+      body: JSON.stringify({
+        sdp,
+        voice,
+        ...(leadFlowContext?.leadFlowSession
+          ? { leadFlowSession: leadFlowContext.leadFlowSession }
+          : {}),
+      }),
       signal,
     });
 

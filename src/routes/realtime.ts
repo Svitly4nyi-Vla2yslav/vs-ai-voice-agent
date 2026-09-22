@@ -2,15 +2,20 @@ import { Router } from "express";
 import { APIError } from "openai";
 import { z } from "zod";
 
-import { realtimeVoices } from "../config/env.js";
+import { env, realtimeVoices } from "../config/env.js";
 import { isSameOriginRequest } from "../http/same-origin.js";
 import { openAIClient, voiceAgentConfiguration } from "../services/openai.js";
+import {
+  leadFlowConversationContext,
+  readLeadFlowSessionToken,
+} from "../services/leadflow-session.js";
 
 export const realtimeRouter = Router();
 
 const voiceSelectionSchema = z
   .object({
     voice: z.enum(realtimeVoices).optional(),
+    leadFlowSession: z.string().trim().min(1).max(16_384).optional(),
   })
   .strict();
 
@@ -28,6 +33,21 @@ realtimeRouter.post("/api/realtime/client-secret", async (request, response) => 
 
   const selectedVoice =
     parsedRequest.data.voice ?? voiceAgentConfiguration.voice;
+  const leadFlowContext = parsedRequest.data.leadFlowSession
+    ? env.LEADFLOW_INTEGRATION_TOKEN
+      ? readLeadFlowSessionToken(
+          parsedRequest.data.leadFlowSession,
+          env.LEADFLOW_INTEGRATION_TOKEN,
+        )
+      : undefined
+    : undefined;
+  if (parsedRequest.data.leadFlowSession && !leadFlowContext) {
+    response.status(400).json({ error: "Invalid LeadFlow session" });
+    return;
+  }
+  const contextInstructions = leadFlowContext
+    ? `\n\n${leadFlowConversationContext(leadFlowContext)}`
+    : "";
 
   try {
     const clientSecret = await openAIClient.realtime.clientSecrets.create({
@@ -38,7 +58,7 @@ realtimeRouter.post("/api/realtime/client-secret", async (request, response) => 
       session: {
         type: "realtime",
         model: voiceAgentConfiguration.model,
-        instructions: voiceAgentConfiguration.instructions,
+        instructions: `${voiceAgentConfiguration.instructions}${contextInstructions}`,
         output_modalities: ["audio"],
         audio: {
           input: {

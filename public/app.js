@@ -12,6 +12,11 @@ const outputVolumeValue = document.querySelector("#output-volume-value");
 const toolActivityElement = document.querySelector("#tool-activity");
 const leadFlowLeadIdInput = document.querySelector("#leadflow-lead-id");
 const leadFlowStatusElement = document.querySelector("#leadflow-status");
+const leadFlowContextElement = document.querySelector("#leadflow-context");
+const leadFlowCompanyElement = document.querySelector("#leadflow-company");
+const leadFlowContactRow = document.querySelector("#leadflow-contact-row");
+const leadFlowContactElement = document.querySelector("#leadflow-contact");
+const leadFlowDevFallback = document.querySelector("#leadflow-dev-fallback");
 
 const DEFAULT_OUTPUT_VOLUME = 70;
 const OUTPUT_VOLUME_STORAGE_KEY = "vs-voice-agent-output-volume";
@@ -27,6 +32,8 @@ let eventChannel;
 let activeLiveConversation;
 let connectionAbortController;
 let connectionAttempt = 0;
+let activeLeadFlowContext;
+let manualFallbackActive = false;
 
 const loggedRealtimeEvents = new Set([
   "session.created",
@@ -53,15 +60,74 @@ const setLeadFlowStatus = (message) => {
   leadFlowStatusElement.textContent = message;
 };
 
-const loadLeadFlowStatus = async () => {
+const initializeLeadFlowContext = async () => {
+  activeLeadFlowContext = undefined;
+  manualFallbackActive = false;
+  startButton.disabled = true;
+  leadFlowContextElement.hidden = true;
+  leadFlowDevFallback.hidden = true;
+  const url = new URL(window.location.href);
+  const handoffToken = url.searchParams.get("handoff");
+  const manualFallbackRequested =
+    url.searchParams.get("dev") === "manual-lead-id";
+  if (handoffToken) {
+    url.searchParams.delete("handoff");
+    history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
   try {
-    const response = await fetch("/api/tools/leadflow-status", {
+    const statusResponse = await fetch("/api/leadflow/status", {
       headers: { Accept: "application/json" },
     });
-    const body = response.ok ? await response.json() : null;
-    setLeadFlowStatus(body?.configured === true ? "Ready" : "Not configured");
+    const statusBody = statusResponse.ok ? await statusResponse.json() : null;
+
+    if (handoffToken) {
+      setLeadFlowStatus("Connecting");
+      const response = await fetch("/api/leadflow/handoff", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ handoffToken }),
+      });
+      const body = response.ok ? await response.json() : null;
+      if (
+        !body?.ok ||
+        typeof body.sessionToken !== "string" ||
+        typeof body.context?.company !== "string"
+      ) {
+        throw new Error("handoff-failed");
+      }
+      activeLeadFlowContext = { leadFlowSession: body.sessionToken };
+      leadFlowCompanyElement.textContent = body.context.company;
+      if (typeof body.context.contactPerson === "string") {
+        leadFlowContactElement.textContent = body.context.contactPerson;
+        leadFlowContactRow.hidden = false;
+      } else {
+        leadFlowContactRow.hidden = true;
+      }
+      leadFlowContextElement.hidden = false;
+      setLeadFlowStatus("Connected");
+      startButton.disabled = false;
+      return;
+    }
+
+    if (
+      manualFallbackRequested &&
+      statusBody?.manualFallbackEnabled === true
+    ) {
+      manualFallbackActive = true;
+      leadFlowDevFallback.hidden = false;
+      setLeadFlowStatus("Developer fallback");
+      startButton.disabled = false;
+      return;
+    }
+
+    setLeadFlowStatus("LeadFlow connection failed");
   } catch {
-    setLeadFlowStatus("Not configured");
+    activeLeadFlowContext = undefined;
+    setLeadFlowStatus("LeadFlow connection failed");
   }
 };
 
@@ -162,12 +228,12 @@ const cleanup = () => {
   remoteAudio.srcObject = null;
   modeSelect.disabled = false;
   voiceSelect.disabled = false;
-  leadFlowLeadIdInput.disabled = false;
+  if (manualFallbackActive) leadFlowLeadIdInput.disabled = false;
   startButton.disabled = false;
   endButton.disabled = true;
 };
 
-const requestClientSecret = async (voice) => {
+const requestClientSecret = async (voice, leadFlowContext) => {
   let response;
   try {
     response = await fetch("/api/realtime/client-secret", {
@@ -176,7 +242,12 @@ const requestClientSecret = async (voice) => {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ voice }),
+      body: JSON.stringify({
+        voice,
+        ...(leadFlowContext?.leadFlowSession
+          ? { leadFlowSession: leadFlowContext.leadFlowSession }
+          : {}),
+      }),
     });
   } catch {
     throw new Error("backend-unavailable");
@@ -200,10 +271,17 @@ const startConversation = async () => {
     return;
   }
 
-  const leadId = leadFlowLeadIdInput.value.trim();
-  if (!leadId) {
-    setStatus("Enter the operator LeadFlow Lead ID before starting.");
-    leadFlowLeadIdInput.focus();
+  const leadFlowContext = activeLeadFlowContext ??
+    (manualFallbackActive && leadFlowLeadIdInput.value.trim()
+      ? { devLeadId: leadFlowLeadIdInput.value.trim() }
+      : undefined);
+  if (!leadFlowContext) {
+    setStatus(
+      manualFallbackActive
+        ? "Enter the developer fallback LeadFlow Lead ID."
+        : "LeadFlow connection failed.",
+    );
+    if (manualFallbackActive) leadFlowLeadIdInput.focus();
     return;
   }
 
@@ -211,7 +289,7 @@ const startConversation = async () => {
   endButton.disabled = false;
   modeSelect.disabled = true;
   voiceSelect.disabled = true;
-  leadFlowLeadIdInput.disabled = true;
+  if (manualFallbackActive) leadFlowLeadIdInput.disabled = true;
   const currentAttempt = ++connectionAttempt;
   const selectedMode = modeSelect.value;
   const selectedVoice = voiceSelect.value;
@@ -227,7 +305,7 @@ const startConversation = async () => {
         setStatus,
         setToolActivity,
         setLeadFlowStatus,
-        leadId,
+        leadFlowContext,
         signal: abortController.signal,
       });
 
@@ -240,7 +318,7 @@ const startConversation = async () => {
       return;
     }
 
-    const clientSecret = await requestClientSecret(selectedVoice);
+    const clientSecret = await requestClientSecret(selectedVoice, leadFlowContext);
     if (currentAttempt !== connectionAttempt) return;
 
     try {
@@ -382,6 +460,6 @@ outputVolumeSlider.addEventListener("input", () => {
 
 modelElement.textContent = modeModels[modeSelect.value];
 applyOutputVolume(readStoredOutputVolume());
-void loadLeadFlowStatus();
+void initializeLeadFlowContext();
 
 window.addEventListener("beforeunload", cleanup);

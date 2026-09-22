@@ -7,6 +7,11 @@ const optionalEnvironmentValue = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
+const optionalBoolean = z
+  .enum(["true", "false"])
+  .default("false")
+  .transform((value) => value === "true");
+
 export const realtimeVoices = [
   "alloy",
   "ash",
@@ -40,6 +45,7 @@ const environmentSchema = z.object({
   GOOGLE_REFRESH_TOKEN: optionalEnvironmentValue,
   LEADFLOW_BASE_URL: optionalEnvironmentValue,
   LEADFLOW_INTEGRATION_TOKEN: optionalEnvironmentValue,
+  LEADFLOW_ALLOW_MANUAL_LEAD_ID: optionalBoolean,
   CALENDAR_TIMEZONE: z.literal("Europe/Berlin").default("Europe/Berlin"),
   CALENDAR_WORKING_HOURS_START: z
     .string()

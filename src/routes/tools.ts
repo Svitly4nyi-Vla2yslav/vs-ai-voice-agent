@@ -2,7 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { isSameOriginRequest } from "../http/same-origin.js";
+import { env } from "../config/env.js";
 import { getLeadFlowClient } from "../services/leadflow.js";
+import { resolveLeadFlowToolContext } from "../services/leadflow-session.js";
 import { executeAgentTool } from "../tools/index.js";
 
 export const toolsRouter = Router();
@@ -17,8 +19,15 @@ const toolExecutionRequestSchema = z
     name: z.string().trim().min(1).max(100),
     arguments: z.unknown(),
     context: z
-      .object({ leadId: z.string().trim().min(1).max(200) })
+      .object({
+        leadFlowSession: z.string().trim().min(1).max(16_384).optional(),
+        devLeadId: z.string().trim().min(1).max(200).optional(),
+      })
       .strict()
+      .refine(
+        (value) => !(value.leadFlowSession && value.devLeadId),
+        "Use handoff context or developer fallback, not both",
+      )
       .optional(),
   })
   .strict();
@@ -35,10 +44,17 @@ toolsRouter.post("/api/tools/execute", async (request, response) => {
     return;
   }
 
+  const resolvedContext = resolveLeadFlowToolContext(
+    parsedRequest.data.context ?? {},
+    {
+      secret: env.LEADFLOW_INTEGRATION_TOKEN,
+      allowManualLeadId: env.LEADFLOW_ALLOW_MANUAL_LEAD_ID,
+    },
+  );
   const result = await executeAgentTool(
     parsedRequest.data.name,
     parsedRequest.data.arguments,
-    parsedRequest.data.context ?? {},
+    { leadId: resolvedContext?.leadId },
   );
   response.set("Cache-Control", "no-store");
   response.status(200).json(result);

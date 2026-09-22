@@ -3,8 +3,13 @@ import { APIError } from "openai";
 import { z } from "zod";
 
 import { voiceLabVoices } from "../agent/types.js";
+import { env } from "../config/env.js";
 import { isSameOriginRequest } from "../http/same-origin.js";
 import { liveAgentConfiguration, openAIClient } from "../services/openai.js";
+import {
+  leadFlowConversationContext,
+  readLeadFlowSessionToken,
+} from "../services/leadflow-session.js";
 import { agentTools } from "../tools/index.js";
 
 export const liveRouter = Router();
@@ -13,6 +18,7 @@ const liveSessionRequestSchema = z
   .object({
     sdp: z.string().min(1).max(200_000),
     voice: z.enum(voiceLabVoices),
+    leadFlowSession: z.string().trim().min(1).max(16_384).optional(),
   })
   .strict();
 
@@ -29,16 +35,31 @@ liveRouter.post("/api/live/session", async (request, response) => {
   }
 
   try {
+    const leadFlowContext = parsedRequest.data.leadFlowSession
+      ? env.LEADFLOW_INTEGRATION_TOKEN
+        ? readLeadFlowSessionToken(
+            parsedRequest.data.leadFlowSession,
+            env.LEADFLOW_INTEGRATION_TOKEN,
+          )
+        : undefined
+      : undefined;
+    if (parsedRequest.data.leadFlowSession && !leadFlowContext) {
+      response.status(400).json({ error: "Invalid LeadFlow session" });
+      return;
+    }
+    const contextInstructions = leadFlowContext
+      ? `\n\n${leadFlowConversationContext(leadFlowContext)}`
+      : "";
     const liveSession = await openAIClient.live.create({
       session: {
         model: liveAgentConfiguration.model,
-        instructions: liveAgentConfiguration.instructions,
+        instructions: `${liveAgentConfiguration.instructions}${contextInstructions}`,
         store: false,
         delegation: {
           type: "responses",
           responses: {
             model: liveAgentConfiguration.backendModel,
-            instructions: liveAgentConfiguration.backendInstructions,
+            instructions: `${liveAgentConfiguration.backendInstructions}${contextInstructions}`,
             tools: agentTools,
             tool_choice: "auto",
             parallel_tool_calls: false,

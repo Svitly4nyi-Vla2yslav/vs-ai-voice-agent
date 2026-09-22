@@ -42,18 +42,27 @@
           <output id="output-volume-value" for="output-volume">70%</output>
         </div>
 
-        <label for="leadflow-lead-id">LeadFlow Lead ID</label>
-        <input
-          id="leadflow-lead-id"
-          type="text"
-          maxlength="200"
-          autocomplete="off"
-          placeholder="Operator context"
-        />
+        <div id="leadflow-context" class="leadflow-context" hidden>
+          <span>Company: <strong id="leadflow-company"></strong></span>
+          <span id="leadflow-contact-row" hidden>
+            Contact: <strong id="leadflow-contact"></strong>
+          </span>
+        </div>
+
+        <div id="leadflow-dev-fallback" class="leadflow-dev-fallback" hidden>
+          <label for="leadflow-lead-id">Developer fallback — LeadFlow Lead ID</label>
+          <input
+            id="leadflow-lead-id"
+            type="text"
+            maxlength="200"
+            autocomplete="off"
+            placeholder="Development only"
+          />
+        </div>
       </div>
 
       <div class="controls">
-        <button id="start" type="button">Start conversation</button>
+        <button id="start" type="button" disabled>Start conversation</button>
         <button id="end" type="button" disabled>End conversation</button>
       </div>
 

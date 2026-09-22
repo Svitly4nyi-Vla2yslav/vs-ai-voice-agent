@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  leadFlowHandoffResponseSchema,
   leadFlowSuccessResponseSchema,
   voiceAgentInteractionV1Schema,
+  type LeadFlowHandoffResponse,
   type LeadFlowSuccessResponse,
   type SyncLeadFlowInteractionInput,
   type VoiceAgentInteractionV1,
@@ -19,9 +21,23 @@ export type LeadFlowErrorCode =
   | "timeout"
   | "provider_error";
 
+export type LeadFlowHandoffErrorCode =
+  | "configuration_missing"
+  | "authentication_failure"
+  | "handoff_invalid"
+  | "handoff_expired"
+  | "lead_not_found"
+  | "leadflow_unavailable"
+  | "timeout"
+  | "provider_error";
+
 export type LeadFlowClientResult =
   | { ok: true; data: LeadFlowSuccessResponse; eventId: string }
   | { ok: false; error: LeadFlowErrorCode; eventId: string };
+
+export type LeadFlowHandoffResult =
+  | { ok: true; data: LeadFlowHandoffResponse }
+  | { ok: false; error: LeadFlowHandoffErrorCode };
 
 type FetchImplementation = typeof fetch;
 
@@ -67,6 +83,43 @@ const errorFromStatus = async (response: Response): Promise<LeadFlowErrorCode> =
   return "provider_error";
 };
 
+const handoffErrorFromResponse = async (
+  response: Response,
+): Promise<LeadFlowHandoffErrorCode> => {
+  let errorName = "";
+  try {
+    const body = (await response.json()) as unknown;
+    if (
+      body &&
+      typeof body === "object" &&
+      "error" in body &&
+      typeof body.error === "string"
+    ) {
+      errorName = body.error;
+    }
+  } catch {
+    // Status mapping remains sufficient; raw provider bodies are never exposed.
+  }
+  if (response.status === 410 || errorName.includes("expired")) {
+    return "handoff_expired";
+  }
+  if (response.status === 404 || errorName === "lead_not_found") {
+    return "lead_not_found";
+  }
+  if (
+    errorName.includes("handoff") ||
+    response.status === 400 ||
+    response.status === 422
+  ) {
+    return "handoff_invalid";
+  }
+  if (response.status === 401 || response.status === 403) {
+    return "authentication_failure";
+  }
+  if (response.status >= 500) return "leadflow_unavailable";
+  return "provider_error";
+};
+
 export class LeadFlowClient {
   readonly #options: ResolvedLeadFlowClientOptions;
 
@@ -108,6 +161,68 @@ export class LeadFlowClient {
       ...(input.calendar ? { calendar: input.calendar } : {}),
       ...(input.lostReason ? { lostReason: input.lostReason } : {}),
     });
+  }
+
+  async resolveHandoff(handoffToken: string): Promise<LeadFlowHandoffResult> {
+    if (!this.#options.baseUrl || !this.#options.token) {
+      return { ok: false, error: "configuration_missing" };
+    }
+    let baseUrl: string;
+    try {
+      baseUrl = normalizeLeadFlowBaseUrl(this.#options.baseUrl);
+    } catch {
+      return { ok: false, error: "configuration_missing" };
+    }
+    if (!handoffToken.trim() || handoffToken.length > 8_192) {
+      return { ok: false, error: "handoff_invalid" };
+    }
+
+    for (let attempt = 0; attempt <= this.#options.maxTransportRetries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.#options.timeoutMs);
+      try {
+        const response = await this.#options.fetchImplementation(
+          `${baseUrl}/api/integrations/voice-agent/resolve-handoff`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${this.#options.token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ handoffToken }),
+            signal: controller.signal,
+          },
+        );
+        if (!response.ok) {
+          const error = await handoffErrorFromResponse(response);
+          if (error === "leadflow_unavailable" && attempt < this.#options.maxTransportRetries) {
+            continue;
+          }
+          return { ok: false, error };
+        }
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch {
+          return { ok: false, error: "provider_error" };
+        }
+        const parsed = leadFlowHandoffResponseSchema.safeParse(body);
+        return parsed.success
+          ? { ok: true, data: parsed.data }
+          : { ok: false, error: "provider_error" };
+      } catch {
+        const timedOut = controller.signal.aborted;
+        if (attempt < this.#options.maxTransportRetries) continue;
+        return {
+          ok: false,
+          error: timedOut ? "timeout" : "leadflow_unavailable",
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    return { ok: false, error: "leadflow_unavailable" };
   }
 
   async send(

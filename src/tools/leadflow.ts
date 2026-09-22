@@ -1,5 +1,9 @@
 import { syncLeadFlowInteractionInputSchema, type SyncLeadFlowInteractionInput } from "../contracts/leadflow.js";
-import { getLeadFlowClient, type LeadFlowErrorCode } from "../services/leadflow.js";
+import {
+  getLeadFlowClient,
+  type LeadFlowClient,
+  type LeadFlowErrorCode,
+} from "../services/leadflow.js";
 
 export { syncLeadFlowInteractionInputSchema };
 export type { SyncLeadFlowInteractionInput };
@@ -18,6 +22,7 @@ export type SyncLeadFlowInteractionResult =
 export const syncLeadFlowInteraction = async (
   input: SyncLeadFlowInteractionInput,
   leadId: string | undefined,
+  client: Pick<LeadFlowClient, "send"> = getLeadFlowClient(),
 ): Promise<SyncLeadFlowInteractionResult> => {
   if (!leadId) {
     return {
@@ -26,7 +31,7 @@ export const syncLeadFlowInteraction = async (
       externalActionPerformed: false,
     };
   }
-  const result = await getLeadFlowClient().send(leadId, input);
+  const result = await client.send(leadId, input);
   if (!result.ok) {
     console.info("[LeadFlow] sync failed", { reason: result.error });
     return {

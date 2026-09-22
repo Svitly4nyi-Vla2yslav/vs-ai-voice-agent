@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Phase 5B – LeadFlow Sender Integration.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback remains `gpt-realtime-2.1-mini`; all Phase 4D Calendar lifecycle behavior is preserved.
+**Phase 5C – Automatic Lead Context Handoff.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5B verified writeback behavior are preserved.
 
 The registered backend tools are:
 
@@ -25,11 +25,15 @@ Google access uses one-user OAuth 2.0 offline credentials: client ID, client sec
 
 ## LeadFlow server-to-server writeback
 
-The browser never receives `LEADFLOW_INTEGRATION_TOKEN`. It relays only a tool name, model-produced non-secret interaction facts, and the operator-entered LeadFlow lead ID to the existing same-origin `/api/tools/execute` route. The Express/Netlify backend validates the request again, generates the UUID event ID and sends `VoiceAgentInteractionV1` to `POST /api/integrations/voice-agent/interactions` with server-side Bearer authentication.
+The browser never receives `LEADFLOW_INTEGRATION_TOKEN` or a raw canonical lead ID during the normal workflow. LeadFlow opens the Voice Agent with `?handoff=<signed-short-lived-token>`. The browser sends that token once to `POST /api/leadflow/handoff`, removes it from the visible URL, and the Voice Agent backend resolves it server-to-server through LeadFlow's `POST /api/integrations/voice-agent/resolve-handoff` endpoint.
+
+After strict response validation, the backend returns only sanitized company/contact display data and an encrypted, authenticated, 30-minute Voice Agent session token. The token contains the canonical LeadFlow ID but does not expose it as readable browser data. Every future `/api/tools/execute`, Live, and Realtime request revalidates this sealed context server-side. The model cannot supply or override the lead ID.
 
 LeadFlow remains the authoritative CRM. The sender contract contains no requested CRM status, and the strict tool schema rejects `crmStatus`, `crmStatusAfter`, `status`, `stage`, and every other unknown field. Emma reports confirmed facts only and normally does not expose LeadFlow's internal before/after status names.
 
-The development UI requires an operator-only **LeadFlow Lead ID** before the conversation starts. It is separate from spoken input, is not an argument the model can invent, and must never be requested from the customer. A future telephony integration should inject this ID automatically from the LeadFlow record selected for the call. The UI shows only `Not configured`, `Ready`, `Syncing`, `Synced`, `Duplicate accepted`, `Lead not found`, or `Sync error`.
+With a valid handoff, the UI shows `LeadFlow: Connected`, company, and contact person when available. It does not show phone, email, CRM status, tokens, or internal IDs. Missing, modified, expired, unknown-lead, or authentication-failed handoffs show `LeadFlow connection failed` and leave conversation start/writeback disabled. No previous lead context is stored in browser storage or reused.
+
+Manual lead entry is a development-only fallback. It is disabled by default and appears only when the server has `LEADFLOW_ALLOW_MANUAL_LEAD_ID=true` and the page is explicitly opened with `?dev=manual-lead-id`. It is never the normal LeadFlow launch path.
 
 One logical writeback receives one application-generated UUID. A transport retry reuses the exact payload and UUID. An equivalent LeadFlow replay with `duplicate: true` is successful; `409 event_conflict` is controlled and never retried or rewritten under that UUID. Authentication, missing configuration, timeout, unavailability, missing lead, invalid evidence, malformed response, and generic provider errors are returned as sanitized categories. Tokens, raw provider bodies, stack traces, and CRM status values are not returned to the browser.
 
@@ -95,6 +99,7 @@ GOOGLE_REFRESH_TOKEN=<offline refresh token>
 
 LEADFLOW_BASE_URL=http://localhost:3001
 LEADFLOW_INTEGRATION_TOKEN=<server-side shared secret>
+LEADFLOW_ALLOW_MANUAL_LEAD_ID=false
 
 CALENDAR_TIMEZONE=Europe/Berlin
 CALENDAR_WORKING_HOURS_START=09:00
@@ -128,6 +133,7 @@ npm run check:tools
 npm run check:calendar
 npm run check:google-calendar
 npm run check:leadflow
+npm run check:leadflow-handoff
 npm run typecheck
 npm run build
 npm run check:openai
@@ -146,6 +152,19 @@ npm run dev
 Run LeadFlow at `http://localhost:3001` and this Voice Agent at `http://localhost:3002`; fixed separate ports avoid `EADDRINUSE`. Verify `GET http://localhost:3002/health`, then use the browser Voice Quality Lab.
 
 `check:leadflow` is fully mocked and never calls LeadFlow. It covers a valid request, server-side Authorization, secret-safe logging, timeout, 401, 404, 400, 409 without unsafe retry, duplicate acceptance, malformed responses, UTF-8 summaries, forbidden CRM status fields, stable event IDs across transport retry, new IDs for new interactions, verified Calendar mapping, and rejection of unconfirmed meetings.
+
+`check:leadflow-handoff` is fully mocked. It covers valid resolution, server-side Bearer authentication, canonical ID binding, tamper/expiry rejection, unknown leads, missing context, cross-session isolation, explicit developer fallback, and writeback using the resolved ID.
+
+## Manual automatic-handoff end-to-end test
+
+1. Run LeadFlow at `http://localhost:3001` and the Voice Agent at `http://localhost:3002` with matching integration tokens.
+2. Keep `LEADFLOW_ALLOW_MANUAL_LEAD_ID=false` for the normal flow.
+3. Open LeadFlow, open one client, and choose **Call with Emma**.
+4. Confirm the Voice Agent opens with `?handoff=...`, immediately removes the token from its visible URL, and shows `LeadFlow: Connected`, the expected company, and contact person when present.
+5. Start the conversation, confirm one meaningful outcome, and verify the interaction appears on that exact LeadFlow client without copying a UUID.
+6. Modify one character of a newly generated handoff token and verify `LeadFlow connection failed` with Start disabled. Repeat with an expired token and confirm no prior company or lead context appears.
+
+LeadFlow owns ID creation. The Voice Agent only consumes the canonical ID returned by verified handoff resolution. Emma never guesses, creates, asks for, or speaks lead IDs.
 
 ## Manual LeadFlow integration test
 
@@ -200,7 +219,7 @@ Google Appointment Schedule is separate from Emma's API flow and is not required
 
 ## Netlify configuration
 
-In **Project configuration → Environment variables**, add every OpenAI, Google, and LeadFlow variable shown above except `PORT`. `LEADFLOW_BASE_URL` must be the deployed LeadFlow origin. `LEADFLOW_INTEGRATION_TOKEN` must exactly match LeadFlow's production `VOICE_AGENT_INTEGRATION_TOKEN`; mark it secret in Netlify. Add the Calendar policy variables if their defaults should be overridden. Never upload OAuth JSON files and never put secrets in `netlify.toml` or `public`.
+In **Project configuration → Environment variables**, add every OpenAI, Google, and LeadFlow variable shown above except `PORT`. `LEADFLOW_BASE_URL` must be the deployed LeadFlow origin. `LEADFLOW_INTEGRATION_TOKEN` must exactly match LeadFlow's production `VOICE_AGENT_INTEGRATION_TOKEN`; mark it secret in Netlify. Keep `LEADFLOW_ALLOW_MANUAL_LEAD_ID=false` in production. Add the Calendar policy variables if their defaults should be overridden. Never upload OAuth JSON files and never put secrets in `netlify.toml` or `public`.
 
 After saving the variables, trigger a new deploy. Verify `/health`, then run the browser voice scenarios against the deployed origin. Netlify Functions need outbound HTTPS access to Google APIs, which is part of normal Netlify operation.
 
@@ -221,9 +240,9 @@ Logs contain tool names, coarse statuses, and action types only. They do not con
 - The browser has no verified current caller number, so phone meetings require the customer to provide and confirm a callback number.
 - Attendee invitations and customer email notifications are not implemented.
 - A callback writeback records confirmed facts in LeadFlow, but LeadFlow alone decides whether the evidence changes CRM status.
-- The browser operator must currently paste the canonical LeadFlow lead ID; there is no lookup or phone-number matching.
+- Normal LeadFlow launches resolve the canonical lead automatically. Manual ID entry remains disabled unless the explicit development-only flag and URL mode are both enabled.
 - Real LeadFlow connectivity is not proven by automated tests and requires Vladyslav's explicit manual integration test.
 
-## Recommended Phase 5C
+## Recommended next phase
 
-First perform the manual local and deployed Phase 5B writeback test, including a duplicate replay and a confirmed Google Calendar booking. Phase 5C should then inject the canonical lead ID from an operator-selected LeadFlow record or authenticated call-session handoff, removing manual paste while preserving server-side token isolation and LeadFlow authority. Twilio/SIP, automatic dialing, fuzzy matching, bulk calling, Gmail sending, and lead creation should remain separate explicitly authorized phases.
+Phase 5D should deploy and manually verify the complete LeadFlow → Voice Agent → confirmed writeback loop, then add privacy-safe operational telemetry for handoff resolution and session expiry. Twilio/SIP, automatic dialing, phone matching, fuzzy lookup, bulk calling, Gmail sending, and lead creation should remain separate explicitly authorized phases.

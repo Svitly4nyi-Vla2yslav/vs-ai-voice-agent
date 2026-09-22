@@ -5,6 +5,7 @@ import express, {
 
 import { healthRouter } from "./routes/health.js";
 import { liveRouter } from "./routes/live.js";
+import { leadFlowRouter } from "./routes/leadflow.js";
 import { realtimeRouter } from "./routes/realtime.js";
 import { toolsRouter } from "./routes/tools.js";
 
@@ -16,6 +17,7 @@ app.set("trust proxy", 1);
 
 app.use(express.json());
 app.use(healthRouter);
+app.use(leadFlowRouter);
 app.use(realtimeRouter);
 app.use(liveRouter);
 app.use(toolsRouter);

@@ -12,6 +12,7 @@
     "check:calendar": "tsx src/scripts/check-calendar.ts",
     "check:google-calendar": "tsx src/scripts/check-google-calendar.ts",
     "check:leadflow": "tsx src/scripts/check-leadflow.ts",
+    "check:leadflow-handoff": "tsx src/scripts/check-leadflow-handoff.ts",
     "calendar:test": "tsx src/scripts/test-google-calendar.ts",
     "calendar:lifecycle-test": "tsx src/scripts/test-calendar-lifecycle.ts",
     "leadflow:test": "tsx src/scripts/test-leadflow-integration.ts",
