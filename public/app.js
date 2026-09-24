@@ -16,6 +16,9 @@ const leadFlowContextElement = document.querySelector("#leadflow-context");
 const leadFlowCompanyElement = document.querySelector("#leadflow-company");
 const leadFlowContactRow = document.querySelector("#leadflow-contact-row");
 const leadFlowContactElement = document.querySelector("#leadflow-contact");
+const leadFlowCallStatusElement = document.querySelector("#leadflow-call-status");
+const leadFlowObjectiveRow = document.querySelector("#leadflow-objective-row");
+const leadFlowObjectiveElement = document.querySelector("#leadflow-objective");
 const leadFlowDevFallback = document.querySelector("#leadflow-dev-fallback");
 
 const DEFAULT_OUTPUT_VOLUME = 70;
@@ -65,6 +68,12 @@ const initializeLeadFlowContext = async () => {
   manualFallbackActive = false;
   startButton.disabled = true;
   leadFlowContextElement.hidden = true;
+  leadFlowCompanyElement.textContent = "";
+  leadFlowContactElement.textContent = "";
+  leadFlowContactRow.hidden = true;
+  leadFlowCallStatusElement.textContent = "";
+  leadFlowObjectiveElement.textContent = "";
+  leadFlowObjectiveRow.hidden = true;
   leadFlowDevFallback.hidden = true;
   const url = new URL(window.location.href);
   const handoffToken = url.searchParams.get("handoff");
@@ -95,17 +104,23 @@ const initializeLeadFlowContext = async () => {
       if (
         !body?.ok ||
         typeof body.sessionToken !== "string" ||
-        typeof body.context?.company !== "string"
+        typeof body.context?.company !== "string" ||
+        body.context?.callStatus !== "Ready"
       ) {
         throw new Error("handoff-failed");
       }
       activeLeadFlowContext = { leadFlowSession: body.sessionToken };
       leadFlowCompanyElement.textContent = body.context.company;
+      leadFlowCallStatusElement.textContent = body.context.callStatus;
       if (typeof body.context.contactPerson === "string") {
         leadFlowContactElement.textContent = body.context.contactPerson;
         leadFlowContactRow.hidden = false;
       } else {
         leadFlowContactRow.hidden = true;
+      }
+      if (typeof body.context.callObjective === "string") {
+        leadFlowObjectiveElement.textContent = body.context.callObjective;
+        leadFlowObjectiveRow.hidden = false;
       }
       leadFlowContextElement.hidden = false;
       setLeadFlowStatus("Connected");

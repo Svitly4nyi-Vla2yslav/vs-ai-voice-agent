@@ -270,31 +270,114 @@ const optionalContactEmail = z
   .optional()
   .transform((value) => value ?? null);
 
-export const leadFlowHandoffResponseSchema = z
+export const leadFlowLeadSchema = z
   .object({
-    ok: z.literal(true),
-    lead: z
-      .object({
-        id: boundedText(200),
-        company: boundedText(500),
-        contactPerson: optionalContactText,
-        phone: optionalContactText,
-        email: optionalContactEmail,
-        crmStatus: z.enum([
-          "NEW",
-          "AUDITED",
-          "CONTACTED",
-          "REPLY",
-          "CALL",
-          "OFFER",
-          "FOLLOW-UP",
-          "WON",
-          "LOST",
-        ]),
-      })
-      .strict(),
+    id: boundedText(200),
+    company: boundedText(500),
+    contactPerson: optionalContactText,
+    phone: optionalContactText,
+    email: optionalContactEmail,
+    crmStatus: z.enum([
+      "NEW",
+      "AUDITED",
+      "CONTACTED",
+      "REPLY",
+      "CALL",
+      "OFFER",
+      "FOLLOW-UP",
+      "WON",
+      "LOST",
+    ]),
   })
   .strict();
+
+const optionalBriefText = (maximum = 2_000) =>
+  z.string().trim().min(1).max(maximum).optional();
+
+export const leadFlowCallBriefSchema = z
+  .object({
+    leadId: boundedText(200),
+    company: boundedText(500),
+    contactPerson: optionalBriefText(500),
+    phone: optionalBriefText(500),
+    email: z.string().trim().email().max(254).optional(),
+    website: optionalBriefText(2_000),
+    branche: optionalBriefText(500),
+    ort: optionalBriefText(500),
+    preferredLanguage: z.enum(["de", "uk", "ru", "en"]).optional(),
+    decisionMaker: optionalBriefText(),
+    currentSituation: optionalBriefText(),
+    painPoints: optionalBriefText(),
+    auditProblem: optionalBriefText(),
+    proposedSolution: optionalBriefText(),
+    emmaFocus: optionalBriefText(),
+    doNotMention: optionalBriefText(),
+    callObjective: boundedText(2_000),
+    offerFocus: optionalBriefText(),
+    operatorNote: optionalBriefText(5_000),
+  })
+  .strict();
+
+export const leadFlowLegacyHandoffResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    lead: leadFlowLeadSchema,
+  })
+  .strict();
+
+export const leadFlowTaskAwareHandoffResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    lead: leadFlowLeadSchema,
+    callTask: z
+      .object({
+        id: boundedText(200),
+        status: z.literal("READY"),
+        scheduledAt: z.preprocess(nullToUndefined, isoTimestamp.optional()),
+      })
+      .strict(),
+    callBrief: leadFlowCallBriefSchema,
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.callBrief.leadId !== value.lead.id) {
+      context.addIssue({
+        code: "custom",
+        path: ["callBrief", "leadId"],
+        message: "Call Brief lead must match canonical lead",
+      });
+    }
+    if (value.callBrief.company !== value.lead.company) {
+      context.addIssue({
+        code: "custom",
+        path: ["callBrief", "company"],
+        message: "Call Brief company must match canonical lead",
+      });
+    }
+    if (
+      value.callBrief.contactPerson !== undefined &&
+      value.callBrief.contactPerson !== value.lead.contactPerson
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["callBrief", "contactPerson"],
+        message: "Call Brief contact must match canonical lead",
+      });
+    }
+  });
+
+export const leadFlowHandoffResponseSchema = z.union([
+  leadFlowTaskAwareHandoffResponseSchema,
+  leadFlowLegacyHandoffResponseSchema,
+]);
+
+export type LeadFlowCallBrief = z.infer<typeof leadFlowCallBriefSchema>;
+export type LeadFlowTaskAwareHandoffResponse = z.infer<
+  typeof leadFlowTaskAwareHandoffResponseSchema
+>;
+export type LeadFlowLegacyHandoffResponse = z.infer<
+  typeof leadFlowLegacyHandoffResponseSchema
+>;
 
 export type LeadFlowHandoffResponse = z.infer<
   typeof leadFlowHandoffResponseSchema

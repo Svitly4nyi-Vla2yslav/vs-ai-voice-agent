@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Phase 5C – Automatic Lead Context Handoff.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5B verified writeback behavior are preserved.
+**Phase 5D-B2 – CallTask-aware Emma session.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5A/5C verified writeback and handoff behavior are preserved.
 
 The registered backend tools are:
 
@@ -27,13 +27,17 @@ Google access uses one-user OAuth 2.0 offline credentials: client ID, client sec
 
 The browser never receives `LEADFLOW_INTEGRATION_TOKEN` or a raw canonical lead ID during the normal workflow. LeadFlow opens the Voice Agent with `?handoff=<signed-short-lived-token>`. The browser sends that token once to `POST /api/leadflow/handoff`, removes it from the visible URL, and the Voice Agent backend resolves it server-to-server through LeadFlow's `POST /api/integrations/voice-agent/resolve-handoff` endpoint.
 
-After strict response validation, the backend returns only sanitized company/contact display data and an encrypted, authenticated, 30-minute Voice Agent session token. The token contains the canonical LeadFlow ID but does not expose it as readable browser data. Every future `/api/tools/execute`, Live, and Realtime request revalidates this sealed context server-side. The model cannot supply or override the lead ID.
+The normal handoff accepts only a canonical lead, a canonical `READY` CallTask, and a strict current Call Brief. Unknown nested fields, missing/non-READY tasks, malformed briefs, and mismatched embedded lead identity are rejected. The backend returns only sanitized operator display data and an encrypted, authenticated, 30-minute Voice Agent session token. That sealed version-2 context binds `leadId`, `callTaskId`, company, contact person, and the approved Call Brief fields; it never stores credentials, handoff/integration tokens, raw provider responses, CRM timelines, or messages.
+
+Every future `/api/tools/execute`, Live, and Realtime request revalidates the sealed context server-side. Tool routing receives the canonical lead and task identifiers from that context only. Neither model arguments nor browser tool arguments can supply or override them. `syncLeadFlowInteraction` continues to use the canonical lead ID; the bound task ID is reserved for Phase 5D-C structured task feedback.
+
+The Call Brief is inserted into Emma's operator context as explicitly untrusted business data, not as instructions. `callObjective`, `emmaFocus`, `offerFocus`, and `doNotMention` guide the prepared call. `currentSituation`, `painPoints`, and `auditProblem` remain prior CRM context and must be explored naturally rather than attributed to the customer as confirmed statements. IDs and CRM status never enter conversational prompt text.
 
 LeadFlow remains the authoritative CRM. The sender contract contains no requested CRM status, and the strict tool schema rejects `crmStatus`, `crmStatusAfter`, `status`, `stage`, and every other unknown field. Emma reports confirmed facts only and normally does not expose LeadFlow's internal before/after status names.
 
-With a valid handoff, the UI shows `LeadFlow: Connected`, company, and contact person when available. It does not show phone, email, CRM status, tokens, or internal IDs. Missing, modified, expired, unknown-lead, or authentication-failed handoffs show `LeadFlow connection failed` and leave conversation start/writeback disabled. No previous lead context is stored in browser storage or reused.
+With a valid task-aware handoff, the UI shows `LeadFlow: Connected`, the company, `Call: Ready`, contact person when available, and a concise call-objective preview. It does not show phone, email, CRM status, tokens, or internal IDs. Missing, modified, expired, legacy lead-only, unknown-lead, or authentication-failed normal handoffs show `LeadFlow connection failed` and leave conversation start/writeback disabled. Each handoff creates a fresh sealed context; no previous lead, task, company, or Call Brief is stored in browser storage or reused.
 
-Manual lead entry is a development-only fallback. It is disabled by default and appears only when the server has `LEADFLOW_ALLOW_MANUAL_LEAD_ID=true` and the page is explicitly opened with `?dev=manual-lead-id`. It is never the normal LeadFlow launch path.
+Lead-only version-1 response validation remains supported for backward compatibility, but the normal browser handoff requires a task-aware response and never invents a CallTask ID. Manual lead entry is a development-only fallback. It is disabled by default and appears only when the server has `LEADFLOW_ALLOW_MANUAL_LEAD_ID=true` and the page is explicitly opened with `?dev=manual-lead-id`. It is never treated as a `READY` task session or used by the normal LeadFlow launch path.
 
 One logical writeback receives one application-generated UUID. A transport retry reuses the exact payload and UUID. An equivalent LeadFlow replay with `duplicate: true` is successful; `409 event_conflict` is controlled and never retried or rewritten under that UUID. Authentication, missing configuration, timeout, unavailability, missing lead, invalid evidence, malformed response, and generic provider errors are returned as sanitized categories. Tokens, raw provider bodies, stack traces, and CRM status values are not returned to the browser.
 
@@ -153,18 +157,21 @@ Run LeadFlow at `http://localhost:3001` and this Voice Agent at `http://localhos
 
 `check:leadflow` is fully mocked and never calls LeadFlow. It covers a valid request, server-side Authorization, secret-safe logging, timeout, 401, 404, 400, 409 without unsafe retry, duplicate acceptance, malformed responses, UTF-8 summaries, forbidden CRM status fields, stable event IDs across transport retry, new IDs for new interactions, verified Calendar mapping, and rejection of unconfirmed meetings.
 
-`check:leadflow-handoff` is fully mocked. It covers valid resolution, server-side Bearer authentication, canonical ID binding, tamper/expiry rejection, unknown leads, missing context, cross-session isolation, explicit developer fallback, and writeback using the resolved ID.
+`check:leadflow-handoff` is fully mocked. It covers strict task-aware resolution, server-side Bearer authentication, canonical lead/task binding, model override rejection, Call Brief prompt injection without IDs, hostile CRM-text hierarchy, tamper/expiry rejection, missing/non-READY tasks, malformed/unknown brief fields, safe optionals, cross-session lead/task/brief isolation, explicit legacy/developer fallback, and writeback using the resolved lead ID.
 
 ## Manual automatic-handoff end-to-end test
 
 1. Run LeadFlow at `http://localhost:3001` and the Voice Agent at `http://localhost:3002` with matching integration tokens.
 2. Keep `LEADFLOW_ALLOW_MANUAL_LEAD_ID=false` for the normal flow.
-3. Open LeadFlow, open one client, and choose **Call with Emma**.
-4. Confirm the Voice Agent opens with `?handoff=...`, immediately removes the token from its visible URL, and shows `LeadFlow: Connected`, the expected company, and contact person when present.
-5. Start the conversation, confirm one meaningful outcome, and verify the interaction appears on that exact LeadFlow client without copying a UUID.
-6. Modify one character of a newly generated handoff token and verify `LeadFlow connection failed` with Start disabled. Repeat with an expired token and confirm no prior company or lead context appears.
+3. In LeadFlow, choose the intended lead.
+4. Prepare a CallTask with a non-empty call objective and confirm LeadFlow shows it as `READY`.
+5. Choose **Emma anrufen / Call with Emma**. Do not copy a UUID and do not enter a CallTask ID.
+6. Confirm the Voice Agent opens, immediately removes `?handoff=...` from its visible URL, and shows `LeadFlow: Connected`, the expected company, `Call: Ready`, and the expected call-objective preview.
+7. Start the conversation. Confirm Emma uses the objective and known context for natural discovery without claiming unconfirmed CRM assumptions came from the customer.
+8. Confirm one meaningful outcome and verify the interaction appears on that exact LeadFlow client; task feedback/completion is intentionally not written yet.
+9. Modify one character of a newly generated handoff token and verify `LeadFlow connection failed` with Start disabled. Repeat with an expired token and confirm no prior company, lead, task, or Call Brief appears.
 
-LeadFlow owns ID creation. The Voice Agent only consumes the canonical ID returned by verified handoff resolution. Emma never guesses, creates, asks for, or speaks lead IDs.
+LeadFlow owns ID creation. The Voice Agent only consumes the canonical lead and CallTask IDs returned by verified handoff resolution. Emma never guesses, creates, asks for, or speaks either ID.
 
 ## Manual LeadFlow integration test
 
@@ -243,6 +250,6 @@ Logs contain tool names, coarse statuses, and action types only. They do not con
 - Normal LeadFlow launches resolve the canonical lead automatically. Manual ID entry remains disabled unless the explicit development-only flag and URL mode are both enabled.
 - Real LeadFlow connectivity is not proven by automated tests and requires Vladyslav's explicit manual integration test.
 
-## Recommended next phase
+## Requirements for Phase 5D-C
 
-Phase 5D should deploy and manually verify the complete LeadFlow → Voice Agent → confirmed writeback loop, then add privacy-safe operational telemetry for handoff resolution and session expiry. Twilio/SIP, automatic dialing, phone matching, fuzzy lookup, bulk calling, Gmail sending, and lead creation should remain separate explicitly authorized phases.
+Phase 5D-C can add structured feedback writeback to the bound CallTask. It must use the authenticated session's canonical `callTaskId` (never a model/browser ID), define a strict versioned feedback contract, preserve idempotency and canonical `leadId` writeback, validate that the task still belongs to the lead, and let LeadFlow own task lifecycle transitions. It should add explicit outcome/evidence validation, sanitized failure behavior, task/lead mismatch tests, replay/conflict tests, and manual verification. Twilio/SIP, dialing, `DIALING` transition, automatic task completion, bulk calls, Gmail, fuzzy lookup, and lead creation remain out of scope.

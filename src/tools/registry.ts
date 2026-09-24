@@ -373,7 +373,10 @@ const failure = (
 export const executeAgentTool = async (
   name: string,
   rawArguments: unknown,
-  context: { leadId?: string | undefined } = {},
+  context: {
+    leadId?: string | undefined;
+    callTaskId?: string | undefined;
+  } = {},
 ): Promise<AgentToolResult> => {
   const safeToolName = registeredToolNames.has(name) ? name : "unknown";
   console.info("[Agent Tool] requested", { tool: safeToolName });

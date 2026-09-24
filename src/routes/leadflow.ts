@@ -4,7 +4,10 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { isSameOriginRequest } from "../http/same-origin.js";
 import { getLeadFlowClient } from "../services/leadflow.js";
-import { createLeadFlowSessionToken } from "../services/leadflow-session.js";
+import {
+  createLeadFlowSessionToken,
+  sanitizeCallBrief,
+} from "../services/leadflow-session.js";
 
 export const leadFlowRouter = Router();
 
@@ -35,8 +38,16 @@ leadFlowRouter.post("/api/leadflow/handoff", async (request, response) => {
   const result = await getLeadFlowClient().resolveHandoff(
     parsed.data.handoffToken,
   );
-  if (!result.ok || !env.LEADFLOW_INTEGRATION_TOKEN) {
-    const safeReason = result.ok ? "configuration_missing" : result.error;
+  if (
+    !result.ok ||
+    !env.LEADFLOW_INTEGRATION_TOKEN ||
+    !("callTask" in result.data)
+  ) {
+    const safeReason = result.ok
+      ? env.LEADFLOW_INTEGRATION_TOKEN
+        ? "task_context_missing"
+        : "configuration_missing"
+      : result.error;
     console.info("[LeadFlow] handoff resolution failed", {
       reason: safeReason,
     });
@@ -47,8 +58,10 @@ leadFlowRouter.post("/api/leadflow/handoff", async (request, response) => {
   const sessionToken = createLeadFlowSessionToken(
     {
       leadId: result.data.lead.id,
+      callTaskId: result.data.callTask.id,
       company: result.data.lead.company,
       contactPerson: result.data.lead.contactPerson,
+      callBrief: sanitizeCallBrief(result.data.callBrief),
     },
     env.LEADFLOW_INTEGRATION_TOKEN,
   );
@@ -59,6 +72,8 @@ leadFlowRouter.post("/api/leadflow/handoff", async (request, response) => {
     context: {
       company: result.data.lead.company,
       contactPerson: result.data.lead.contactPerson,
+      callStatus: "Ready",
+      callObjective: result.data.callBrief.callObjective.slice(0, 240),
     },
   });
 });

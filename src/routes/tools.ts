@@ -20,7 +20,7 @@ const toolExecutionRequestSchema = z
     arguments: z.unknown(),
     context: z
       .object({
-        leadFlowSession: z.string().trim().min(1).max(16_384).optional(),
+        leadFlowSession: z.string().trim().min(1).max(65_536).optional(),
         devLeadId: z.string().trim().min(1).max(200).optional(),
       })
       .strict()
@@ -54,7 +54,14 @@ toolsRouter.post("/api/tools/execute", async (request, response) => {
   const result = await executeAgentTool(
     parsedRequest.data.name,
     parsedRequest.data.arguments,
-    { leadId: resolvedContext?.leadId },
+    {
+      leadId: resolvedContext?.leadId,
+      ...(
+        resolvedContext && "callTaskId" in resolvedContext
+          ? { callTaskId: resolvedContext.callTaskId }
+          : {}
+      ),
+    },
   );
   response.set("Cache-Control", "no-store");
   response.status(200).json(result);

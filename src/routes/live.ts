@@ -18,7 +18,7 @@ const liveSessionRequestSchema = z
   .object({
     sdp: z.string().min(1).max(200_000),
     voice: z.enum(voiceLabVoices),
-    leadFlowSession: z.string().trim().min(1).max(16_384).optional(),
+    leadFlowSession: z.string().trim().min(1).max(65_536).optional(),
   })
   .strict();
 

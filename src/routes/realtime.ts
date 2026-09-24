@@ -15,7 +15,7 @@ export const realtimeRouter = Router();
 const voiceSelectionSchema = z
   .object({
     voice: z.enum(realtimeVoices).optional(),
-    leadFlowSession: z.string().trim().min(1).max(16_384).optional(),
+    leadFlowSession: z.string().trim().min(1).max(65_536).optional(),
   })
   .strict();
 
