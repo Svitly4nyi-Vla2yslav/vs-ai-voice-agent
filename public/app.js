@@ -63,6 +63,25 @@ const setLeadFlowStatus = (message) => {
   leadFlowStatusElement.textContent = message;
 };
 
+const leadFlowFailureMessage = (reason) => {
+  switch (reason) {
+    case "configuration_missing":
+      return "LeadFlow not configured";
+    case "leadflow_unavailable":
+      return "LeadFlow unavailable";
+    case "authentication_failure":
+      return "LeadFlow authentication failed";
+    case "handoff_invalid":
+    case "handoff_expired":
+      return "Handoff expired or invalid";
+    case "lead_not_found":
+    case "task_context_missing":
+      return "Lead/CallTask unavailable";
+    default:
+      return "LeadFlow connection failed";
+  }
+};
+
 const initializeLeadFlowContext = async () => {
   activeLeadFlowContext = undefined;
   manualFallbackActive = false;
@@ -100,7 +119,11 @@ const initializeLeadFlowContext = async () => {
         },
         body: JSON.stringify({ handoffToken }),
       });
-      const body = response.ok ? await response.json() : null;
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        setLeadFlowStatus(leadFlowFailureMessage(body?.reason));
+        return;
+      }
       if (
         !body?.ok ||
         typeof body.sessionToken !== "string" ||
@@ -139,10 +162,14 @@ const initializeLeadFlowContext = async () => {
       return;
     }
 
-    setLeadFlowStatus("LeadFlow connection failed");
+    setLeadFlowStatus("Open this Voice Agent from a prepared LeadFlow call.");
   } catch {
     activeLeadFlowContext = undefined;
-    setLeadFlowStatus("LeadFlow connection failed");
+    setLeadFlowStatus(
+      handoffToken
+        ? "LeadFlow connection failed"
+        : "Open this Voice Agent from a prepared LeadFlow call.",
+    );
   }
 };
 

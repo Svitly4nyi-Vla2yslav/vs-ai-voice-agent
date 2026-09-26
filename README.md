@@ -35,11 +35,17 @@ The Call Brief is inserted into Emma's operator context as explicitly untrusted 
 
 LeadFlow remains the authoritative CRM. The sender contract contains no requested CRM status, and the strict tool schema rejects `crmStatus`, `crmStatusAfter`, `status`, `stage`, and every other unknown field. Emma reports confirmed facts only and normally does not expose LeadFlow's internal before/after status names.
 
-With a valid task-aware handoff, the UI shows `LeadFlow: Connected`, the company, `Call: Ready`, contact person when available, and a concise call-objective preview. It does not show phone, email, CRM status, tokens, or internal IDs. Missing, modified, expired, legacy lead-only, unknown-lead, or authentication-failed normal handoffs show `LeadFlow connection failed` and leave conversation start/writeback disabled. Each handoff creates a fresh sealed context; no previous lead, task, company, or Call Brief is stored in browser storage or reused.
+With a valid task-aware handoff, the UI shows `LeadFlow: Connected`, the company, `Call: Ready`, contact person when available, and a concise call-objective preview. It does not show phone, email, CRM status, tokens, or internal IDs. Failed handoffs show only a coarse operator-safe state: not configured, unavailable, authentication failed, expired/invalid handoff, unavailable Lead/CallTask, or a generic connection failure. Conversation start/writeback remains disabled. Opening the Voice Agent directly without a handoff says `Open this Voice Agent from a prepared LeadFlow call.` and never invents a lead or enables the production fallback. Each handoff creates a fresh sealed context; no previous lead, task, company, or Call Brief is stored in browser storage or reused.
 
 Lead-only version-1 response validation remains supported for backward compatibility, but the normal browser handoff requires a task-aware response and never invents a CallTask ID. Manual lead entry is a development-only fallback. It is disabled by default and appears only when the server has `LEADFLOW_ALLOW_MANUAL_LEAD_ID=true` and the page is explicitly opened with `?dev=manual-lead-id`. It is never treated as a `READY` task session or used by the normal LeadFlow launch path.
 
 One logical writeback receives one application-generated UUID. A transport retry reuses the exact payload and UUID. An equivalent LeadFlow replay with `duplicate: true` is successful; `409 event_conflict` is controlled and never retried or rewritten under that UUID. Authentication, missing configuration, timeout, unavailability, missing lead, invalid evidence, malformed response, and generic provider errors are returned as sanitized categories. Tokens, raw provider bodies, stack traces, and CRM status values are not returned to the browser.
+
+### Safe LeadFlow diagnostics
+
+`GET /api/leadflow/status` is a no-store, secret-free configuration snapshot. It returns `configured`, `baseUrlConfigured`, `integrationTokenConfigured`, `manualFallbackEnabled`, `environment`, and, only when valid, the normalized public `leadFlowOrigin`. It never returns either integration token, handoff/session tokens, customer data, or raw environment values.
+
+`GET /api/leadflow/diagnostic` performs only a server-side, read-only `GET` to `/api/integrations/voice-agent/health`. Its response is limited to `configured`, `reachable`, `authentication`, and a coarse `reason`. It never creates a handoff or CRM interaction. The current LeadFlow project does not yet implement that health route, so a reachable `404`/`405` is reported honestly as `authentication: "not_checked"` with `reason: "integration_health_unavailable"`. A LeadFlow follow-up must add this authenticated, non-destructive endpoint; until then, a `401`/`403` can identify an authentication failure, but a successful authentication check cannot be claimed.
 
 Writeback happens once when a meaningful result is confirmed, not per utterance. A callback uses `CALLBACK_REQUESTED` only with `followUp.requested=true`, `confirmed=true`, and an unambiguous `date` or `dueAt`; LeadFlow decides whether that evidence changes CRM status. A meeting uses `MEETING_BOOKED` only after Google returns `bookMeeting status=confirmed`; `calendar.eventId`, `start`, `end`, and `meetingMode` are copied from that verified result. Unconfirmed meetings are rejected by the sender schema.
 
@@ -155,9 +161,9 @@ npm run dev
 
 Run LeadFlow at `http://localhost:3001` and this Voice Agent at `http://localhost:3002`; fixed separate ports avoid `EADDRINUSE`. Verify `GET http://localhost:3002/health`, then use the browser Voice Quality Lab.
 
-`check:leadflow` is fully mocked and never calls LeadFlow. It covers a valid request, server-side Authorization, secret-safe logging, timeout, 401, 404, 400, 409 without unsafe retry, duplicate acceptance, malformed responses, UTF-8 summaries, forbidden CRM status fields, stable event IDs across transport retry, new IDs for new interactions, verified Calendar mapping, and rejection of unconfirmed meetings.
+`check:leadflow` is fully mocked and never calls LeadFlow. It covers configuration presence and safe origin normalization, unreachable and authentication-failed diagnostics, absence of secrets in diagnostic results, a valid interaction request, server-side Authorization, secret-safe logging, timeout, 401, 404, 400, 409 without unsafe retry, duplicate acceptance, malformed responses, UTF-8 summaries, forbidden CRM status fields, stable event IDs across transport retry, new IDs for new interactions, verified Calendar mapping, and rejection of unconfirmed meetings.
 
-`check:leadflow-handoff` is fully mocked. It covers strict task-aware resolution, server-side Bearer authentication, canonical lead/task binding, model override rejection, Call Brief prompt injection without IDs, hostile CRM-text hierarchy, tamper/expiry rejection, missing/non-READY tasks, malformed/unknown brief fields, safe optionals, cross-session lead/task/brief isolation, explicit legacy/developer fallback, and writeback using the resolved lead ID.
+`check:leadflow-handoff` is fully mocked. It covers strict task-aware resolution, server-side Bearer authentication, canonical lead/task binding, model override rejection, Call Brief prompt injection without IDs, hostile CRM-text hierarchy, tamper/expiry rejection, missing/non-READY tasks, malformed/unknown brief fields, safe optionals, cross-session lead/task/brief isolation, explicit legacy/developer fallback, direct-open guidance, safe browser failure states, and writeback using the resolved lead ID.
 
 ## Manual automatic-handoff end-to-end test
 
@@ -172,6 +178,17 @@ Run LeadFlow at `http://localhost:3001` and this Voice Agent at `http://localhos
 9. Modify one character of a newly generated handoff token and verify `LeadFlow connection failed` with Start disabled. Repeat with an expired token and confirm no prior company, lead, task, or Call Brief appears.
 
 LeadFlow owns ID creation. The Voice Agent only consumes the canonical lead and CallTask IDs returned by verified handoff resolution. Emma never guesses, creates, asks for, or speaks either ID.
+
+### Exact production handoff test
+
+1. Redeploy both Netlify sites after verifying the production variables below.
+2. Open `https://vs-ai-voice-agent.netlify.app/api/leadflow/status`. Confirm both configuration flags and `configured` are `true`, `environment` is `production`, the optional origin is the expected public LeadFlow origin, and no token appears.
+3. Open `https://vs-ai-voice-agent.netlify.app/api/leadflow/diagnostic`. Confirm it returns only coarse fields. Until LeadFlow adds the authenticated health route, expect `reachable: true`, `authentication: "not_checked"`, and `reason: "integration_health_unavailable"`; `authentication_failure` instead means the shared secrets do not match.
+4. Open `https://vs-ai-voice-agent.netlify.app/` directly. Confirm the page says `Open this Voice Agent from a prepared LeadFlow call.` and **Start conversation** stays disabled.
+5. In production LeadFlow, select a safe test lead and prepare one `READY` CallTask with a non-empty objective.
+6. Choose **Emma anrufen / Call with Emma**. Confirm the new Voice Agent tab removes the handoff query, shows `Connected`, the expected company/task context, and enables **Start conversation**.
+7. Generate a fresh handoff, alter one token character before navigation, and confirm `Handoff expired or invalid`, no lead/task context, and a disabled start button.
+8. For authentication-failure testing, do not rotate production secrets casually. If intentionally tested in a maintenance window, change one site only, redeploy it, confirm the coarse authentication error, then immediately restore the matching secret and redeploy both sites.
 
 ## Manual LeadFlow integration test
 
@@ -226,9 +243,24 @@ Google Appointment Schedule is separate from Emma's API flow and is not required
 
 ## Netlify configuration
 
-In **Project configuration → Environment variables**, add every OpenAI, Google, and LeadFlow variable shown above except `PORT`. `LEADFLOW_BASE_URL` must be the deployed LeadFlow origin. `LEADFLOW_INTEGRATION_TOKEN` must exactly match LeadFlow's production `VOICE_AGENT_INTEGRATION_TOKEN`; mark it secret in Netlify. Keep `LEADFLOW_ALLOW_MANUAL_LEAD_ID=false` in production. Add the Calendar policy variables if their defaults should be overridden. Never upload OAuth JSON files and never put secrets in `netlify.toml` or `public`.
+In **Project configuration → Environment variables**, add every OpenAI, Google, and LeadFlow variable shown above except `PORT`. For the Voice Agent Netlify site, verify exactly:
 
-After saving the variables, trigger a new deploy. Verify `/health`, then run the browser voice scenarios against the deployed origin. Netlify Functions need outbound HTTPS access to Google APIs, which is part of normal Netlify operation.
+```dotenv
+LEADFLOW_BASE_URL=https://<PRODUCTION-LEADFLOW-ORIGIN>
+LEADFLOW_INTEGRATION_TOKEN=<shared-secret>
+LEADFLOW_ALLOW_MANUAL_LEAD_ID=false
+```
+
+For the LeadFlow Netlify site, verify exactly:
+
+```dotenv
+VOICE_AGENT_APP_URL=https://vs-ai-voice-agent.netlify.app
+VOICE_AGENT_INTEGRATION_TOKEN=<same-shared-secret>
+```
+
+`LEADFLOW_BASE_URL` must be the deployed LeadFlow origin. `LEADFLOW_INTEGRATION_TOKEN` must exactly match LeadFlow's production `VOICE_AGENT_INTEGRATION_TOKEN`; mark both values secret in their respective Netlify sites. Never upload OAuth JSON files and never put secrets in `netlify.toml` or `public`.
+
+After saving the variables, redeploy both sites. Verify `/health`, `/api/leadflow/status`, and `/api/leadflow/diagnostic`, then run the browser voice scenarios against the deployed origin. Netlify Functions need outbound HTTPS access to LeadFlow and Google APIs, which is part of normal Netlify operation.
 
 ## Failure and privacy behavior
 

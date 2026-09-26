@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 
 import { syncLeadFlowInteractionInputSchema } from "../contracts/leadflow.js";
-import { LeadFlowClient } from "../services/leadflow.js";
+import {
+  LeadFlowClient,
+  safeHandoffFailureReason,
+} from "../services/leadflow.js";
 
 const fixedEventId = "11111111-1111-4111-8111-111111111111";
 const successBody = {
@@ -22,6 +25,85 @@ const input = {
     note: "Vladyslav soll sich melden.",
   },
 };
+
+const productionConfiguration = new LeadFlowClient({
+  baseUrl: "https://leadflow.example/app/?ignored=true",
+  token: "diagnostic-secret-token",
+}).configurationStatus();
+assert.deepEqual(productionConfiguration, {
+  configured: true,
+  baseUrlConfigured: true,
+  integrationTokenConfigured: true,
+  leadFlowOrigin: "https://leadflow.example",
+});
+assert.deepEqual(
+  new LeadFlowClient({ baseUrl: "", token: "secret" }).configurationStatus(),
+  {
+    configured: false,
+    baseUrlConfigured: false,
+    integrationTokenConfigured: true,
+  },
+  "missing base URL is reported safely",
+);
+assert.deepEqual(
+  new LeadFlowClient({
+    baseUrl: "https://leadflow.example",
+    token: "",
+  }).configurationStatus(),
+  {
+    configured: false,
+    baseUrlConfigured: true,
+    integrationTokenConfigured: false,
+    leadFlowOrigin: "https://leadflow.example",
+  },
+  "missing integration token is reported safely",
+);
+
+const unreachableDiagnostic = await new LeadFlowClient({
+  baseUrl: "https://leadflow.example",
+  token: "never-return-this-secret",
+  fetchImplementation: async () => {
+    throw new Error("network unavailable");
+  },
+}).diagnose();
+assert.deepEqual(unreachableDiagnostic, {
+  configured: true,
+  reachable: false,
+  authentication: "not_checked",
+  reason: "leadflow_unavailable",
+});
+
+const authenticationDiagnostic = await new LeadFlowClient({
+  baseUrl: "https://leadflow.example",
+  token: "never-return-this-secret",
+  fetchImplementation: async () => new Response(null, { status: 401 }),
+}).diagnose();
+assert.deepEqual(authenticationDiagnostic, {
+  configured: true,
+  reachable: true,
+  authentication: "failure",
+  reason: "authentication_failure",
+});
+assert.equal(
+  JSON.stringify({ productionConfiguration, unreachableDiagnostic, authenticationDiagnostic })
+    .includes("never-return-this-secret"),
+  false,
+  "diagnostic responses never contain the integration token",
+);
+
+const missingHealthEndpointDiagnostic = await new LeadFlowClient({
+  baseUrl: "https://leadflow.example",
+  token: "secret",
+  fetchImplementation: async () => new Response(null, { status: 404 }),
+}).diagnose();
+assert.deepEqual(missingHealthEndpointDiagnostic, {
+  configured: true,
+  reachable: true,
+  authentication: "not_checked",
+  reason: "integration_health_unavailable",
+});
+assert.equal(safeHandoffFailureReason("timeout"), "leadflow_unavailable");
+assert.equal(safeHandoffFailureReason("unexpected"), "provider_error");
 
 const missingConfiguration = await new LeadFlowClient({
   baseUrl: "",

@@ -81,3 +81,18 @@ if (!parsedEnvironment.success) {
 }
 
 export const env = parsedEnvironment.data;
+
+export type RuntimeEnvironment =
+  | "production"
+  | "deploy-preview"
+  | "branch-deploy"
+  | "development";
+
+export const runtimeEnvironment = (): RuntimeEnvironment => {
+  if (process.env.CONTEXT === "production" || process.env.NODE_ENV === "production") {
+    return "production";
+  }
+  if (process.env.CONTEXT === "deploy-preview") return "deploy-preview";
+  if (process.env.CONTEXT === "branch-deploy") return "branch-deploy";
+  return "development";
+};

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   leadFlowHandoffResponseSchema,
@@ -16,6 +17,30 @@ import { LeadFlowClient } from "../services/leadflow.js";
 import { syncLeadFlowInteraction } from "../tools/leadflow.js";
 
 const secret = "test-integration-secret-with-at-least-32-characters";
+
+const browserSource = await readFile(
+  new URL("../../public/app.js", import.meta.url),
+  "utf8",
+);
+assert.match(
+  browserSource,
+  /Open this Voice Agent from a prepared LeadFlow call\./,
+  "direct root open explains that a prepared LeadFlow call is required",
+);
+for (const operatorMessage of [
+  "LeadFlow not configured",
+  "LeadFlow unavailable",
+  "LeadFlow authentication failed",
+  "Handoff expired or invalid",
+  "Lead/CallTask unavailable",
+  "LeadFlow connection failed",
+]) {
+  assert.equal(
+    browserSource.includes(operatorMessage),
+    true,
+    `browser includes safe operator state: ${operatorMessage}`,
+  );
+}
 const resolvedLead = {
   ok: true as const,
   lead: {
@@ -308,6 +333,18 @@ assert.deepEqual(await handoffFailure(410, "handoff_expired"), {
 assert.deepEqual(await handoffFailure(404, "lead_not_found"), {
   ok: false,
   error: "lead_not_found",
+});
+assert.deepEqual(await handoffFailure(404, "call_task_not_found"), {
+  ok: false,
+  error: "task_context_missing",
+});
+assert.deepEqual(await handoffFailure(409, "call_task_not_ready"), {
+  ok: false,
+  error: "task_context_missing",
+});
+assert.deepEqual(await handoffFailure(409, "call_task_mismatch"), {
+  ok: false,
+  error: "task_context_missing",
 });
 assert.deepEqual(await handoffFailure(401, "unauthorized"), {
   ok: false,

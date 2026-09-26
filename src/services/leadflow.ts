@@ -27,9 +27,58 @@ export type LeadFlowHandoffErrorCode =
   | "handoff_invalid"
   | "handoff_expired"
   | "lead_not_found"
+  | "task_context_missing"
   | "leadflow_unavailable"
   | "timeout"
   | "provider_error";
+
+export type SafeHandoffFailureReason = Exclude<
+  LeadFlowHandoffErrorCode,
+  "timeout"
+> | "task_context_missing";
+
+export const safeHandoffFailureReason = (
+  reason: string,
+): SafeHandoffFailureReason => {
+  switch (reason) {
+    case "configuration_missing":
+    case "authentication_failure":
+    case "handoff_invalid":
+    case "handoff_expired":
+    case "lead_not_found":
+    case "task_context_missing":
+    case "provider_error":
+      return reason;
+    case "leadflow_unavailable":
+    case "timeout":
+      return "leadflow_unavailable";
+    default:
+      return "provider_error";
+  }
+};
+
+export type LeadFlowDiagnosticReason =
+  | "configuration_missing"
+  | "invalid_base_url"
+  | "leadflow_unavailable"
+  | "authentication_failure"
+  | "integration_health_unavailable"
+  | "provider_error"
+  | "ok";
+
+export type LeadFlowDiagnosticResult = {
+  configured: boolean;
+  reachable: boolean;
+  authentication: "ok" | "failure" | "not_checked";
+  reason: LeadFlowDiagnosticReason;
+};
+
+export type LeadFlowConfigurationStatus = {
+  configured: boolean;
+  baseUrlConfigured: boolean;
+  integrationTokenConfigured: boolean;
+  leadFlowOrigin?: string;
+};
 
 export type LeadFlowClientResult =
   | { ok: true; data: LeadFlowSuccessResponse; eventId: string }
@@ -103,7 +152,14 @@ const handoffErrorFromResponse = async (
   if (response.status === 410 || errorName.includes("expired")) {
     return "handoff_expired";
   }
-  if (response.status === 404 || errorName === "lead_not_found") {
+  if (
+    errorName === "call_task_not_found" ||
+    errorName === "call_task_mismatch" ||
+    errorName === "call_task_not_ready"
+  ) {
+    return "task_context_missing";
+  }
+  if (errorName === "lead_not_found" || response.status === 404) {
     return "lead_not_found";
   }
   if (
@@ -136,7 +192,118 @@ export class LeadFlowClient {
   }
 
   isConfigured(): boolean {
-    return Boolean(this.#options.baseUrl && this.#options.token);
+    return this.configurationStatus().configured;
+  }
+
+  configurationStatus(): LeadFlowConfigurationStatus {
+    const baseUrlConfigured = Boolean(this.#options.baseUrl);
+    const integrationTokenConfigured = Boolean(this.#options.token);
+    let leadFlowOrigin: string | undefined;
+    if (this.#options.baseUrl) {
+      try {
+        leadFlowOrigin = new URL(
+          normalizeLeadFlowBaseUrl(this.#options.baseUrl),
+        ).origin;
+      } catch {
+        // Presence and validity are intentionally reported separately via configured.
+      }
+    }
+    return {
+      configured:
+        baseUrlConfigured &&
+        integrationTokenConfigured &&
+        Boolean(leadFlowOrigin),
+      baseUrlConfigured,
+      integrationTokenConfigured,
+      ...(leadFlowOrigin ? { leadFlowOrigin } : {}),
+    };
+  }
+
+  async diagnose(): Promise<LeadFlowDiagnosticResult> {
+    const configuration = this.configurationStatus();
+    if (!configuration.baseUrlConfigured || !configuration.integrationTokenConfigured) {
+      return {
+        configured: false,
+        reachable: false,
+        authentication: "not_checked",
+        reason: "configuration_missing",
+      };
+    }
+
+    let baseUrl: string;
+    try {
+      baseUrl = normalizeLeadFlowBaseUrl(this.#options.baseUrl as string);
+    } catch {
+      return {
+        configured: false,
+        reachable: false,
+        authentication: "not_checked",
+        reason: "invalid_base_url",
+      };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.#options.timeoutMs);
+    try {
+      const response = await this.#options.fetchImplementation(
+        `${baseUrl}/api/integrations/voice-agent/health`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${this.#options.token}`,
+          },
+          signal: controller.signal,
+        },
+      );
+      if (response.status === 401 || response.status === 403) {
+        return {
+          configured: true,
+          reachable: true,
+          authentication: "failure",
+          reason: "authentication_failure",
+        };
+      }
+      if (response.status === 404 || response.status === 405) {
+        return {
+          configured: true,
+          reachable: true,
+          authentication: "not_checked",
+          reason: "integration_health_unavailable",
+        };
+      }
+      if (response.status >= 500) {
+        return {
+          configured: true,
+          reachable: false,
+          authentication: "not_checked",
+          reason: "leadflow_unavailable",
+        };
+      }
+      if (!response.ok) {
+        return {
+          configured: true,
+          reachable: true,
+          authentication: "not_checked",
+          reason: "provider_error",
+        };
+      }
+      return {
+        configured: true,
+        reachable: true,
+        authentication: "ok",
+        reason: "ok",
+      };
+    } catch {
+      return {
+        configured: true,
+        reachable: false,
+        authentication: "not_checked",
+        reason: "leadflow_unavailable",
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   createPayload(
