@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Phase 5D-B2 – CallTask-aware Emma session.** `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5A/5C verified writeback and handoff behavior are preserved.
+**Phase 5D-B4 – explicit outbound sales conversation mode.** A verified task-aware LeadFlow session now selects `OUTBOUND_SALES` server-side. Emma initiates the first turn exactly once in both Live and Realtime, transparently identifies herself as the AI assistant of VS Web Studio, uses the verified Call Brief, and leads with one relevant discovery question. `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5A/5C verified writeback and handoff behavior are preserved.
 
 The registered backend tools are:
 
@@ -46,6 +46,16 @@ One logical writeback receives one application-generated UUID. A transport retry
 `GET /api/leadflow/status` is a no-store, secret-free configuration snapshot. It returns `configured`, `baseUrlConfigured`, `integrationTokenConfigured`, `manualFallbackEnabled`, `environment`, and, only when valid, the normalized public `leadFlowOrigin`. It never returns either integration token, handoff/session tokens, customer data, or raw environment values.
 
 `GET /api/leadflow/diagnostic` performs only a server-side, read-only `GET` to `/api/integrations/voice-agent/health`. Its response is limited to `configured`, `reachable`, `authentication`, and a coarse `reason`. It never creates a handoff or CRM interaction. The current LeadFlow project does not yet implement that health route, so a reachable `404`/`405` is reported honestly as `authentication: "not_checked"` with `reason: "integration_health_unavailable"`. A LeadFlow follow-up must add this authenticated, non-destructive endpoint; until then, a `401`/`403` can identify an authentication failure, but a successful authentication check cannot be claimed.
+
+### Outbound conversation mode
+
+Conversation mode is an internal server-derived property, not a model/tool argument or authoritative browser parameter. A sealed version-2 task-aware LeadFlow session maps to `OUTBOUND_SALES`; legacy version-1 sessions, direct page access, and the developer lead-ID fallback map to no outbound mode. The architecture has one typed mode-selection boundary so a later phase can add `INBOUND_RECEPTION` without changing how verified context reaches Live and Realtime. This phase does not implement inbound calls, SIP, routing, or telephony.
+
+For `OUTBOUND_SALES`, the verified prompt says that Emma initiated the business call and must speak first. Her opening uses a greeting, transparent AI identity, the exact brand `VS Web Studio`, a concise natural reason derived from the Call Brief, and one targeted permission/discovery question. Generic receptionist openings such as `Wie kann ich Ihnen helfen?` are prohibited only in outbound mode. The browser requests one initial `response.create` after the relevant channel/session is ready; a per-conversation guard prevents repeated session/channel events and later tool responses from creating duplicate greetings. No fake customer speech or transcript is inserted.
+
+`callObjective` is the primary call goal, but internal wording is transformed into natural conversation rather than read verbatim. `emmaFocus` and `offerFocus` help choose the first useful question and relevant value. `currentSituation`, `painPoints`, `auditProblem`, `proposedSolution`, `doNotMention`, and `operatorNote` remain untrusted preparation data. They can shape questions but are never treated as customer-confirmed facts. Mode rules are placed before the delimited untrusted JSON; CRM text cannot select or replace the conversation mode.
+
+The outbound progression is guidance rather than an announced script: opening, permission/relevance, discovery, identified need, relevant value, objection handling, one meaningful next step, and closing. Emma asks one question at a time and does not jump immediately to booking. Soft hesitation receives one relevant diagnostic question and an appropriate next step. Existing hard stops remain authoritative: clear disinterest, `Stop`, no-advertising requests, deletion requests, or do-not-call requests end selling immediately.
 
 Writeback happens once when a meaningful result is confirmed, not per utterance. A callback uses `CALLBACK_REQUESTED` only with `followUp.requested=true`, `confirmed=true`, and an unambiguous `date` or `dueAt`; LeadFlow decides whether that evidence changes CRM status. A meeting uses `MEETING_BOOKED` only after Google returns `bookMeeting status=confirmed`; `calendar.eventId`, `start`, `end`, and `meetingMode` are copied from that verified result. Unconfirmed meetings are rejected by the sender schema.
 
@@ -144,6 +154,7 @@ npm run check:calendar
 npm run check:google-calendar
 npm run check:leadflow
 npm run check:leadflow-handoff
+npm run check:outbound
 npm run typecheck
 npm run build
 npm run check:openai
@@ -164,6 +175,8 @@ Run LeadFlow at `http://localhost:3001` and this Voice Agent at `http://localhos
 `check:leadflow` is fully mocked and never calls LeadFlow. It covers configuration presence and safe origin normalization, unreachable and authentication-failed diagnostics, absence of secrets in diagnostic results, a valid interaction request, server-side Authorization, secret-safe logging, timeout, 401, 404, 400, 409 without unsafe retry, duplicate acceptance, malformed responses, UTF-8 summaries, forbidden CRM status fields, stable event IDs across transport retry, new IDs for new interactions, verified Calendar mapping, and rejection of unconfirmed meetings.
 
 `check:leadflow-handoff` is fully mocked. It covers strict task-aware resolution, server-side Bearer authentication, canonical lead/task binding, model override rejection, Call Brief prompt injection without IDs, hostile CRM-text hierarchy, tamper/expiry rejection, missing/non-READY tasks, malformed/unknown brief fields, safe optionals, cross-session lead/task/brief isolation, explicit legacy/developer fallback, direct-open guidance, safe browser failure states, and writeback using the resolved lead ID.
+
+`check:outbound` verifies that unbound and future inbound-like contexts do not request an outbound opening, while Live and Realtime each request exactly one initial response even when their ready event repeats. The handoff suite additionally verifies server-derived mode selection, outbound opening instructions, inbound-phrase prohibition, hostile CRM mode-text isolation, Call Brief availability, and absence of lead/task IDs from prompt text.
 
 ## Manual automatic-handoff end-to-end test
 
@@ -189,6 +202,18 @@ LeadFlow owns ID creation. The Voice Agent only consumes the canonical lead and 
 6. Choose **Emma anrufen / Call with Emma**. Confirm the new Voice Agent tab removes the handoff query, shows `Connected`, the expected company/task context, and enables **Start conversation**.
 7. Generate a fresh handoff, alter one token character before navigation, and confirm `Handoff expired or invalid`, no lead/task context, and a disabled start button.
 8. For authentication-failure testing, do not rotate production secrets casually. If intentionally tested in a maintenance window, change one site only, redeploy it, confirm the coarse authentication error, then immediately restore the matching secret and redeploy both sites.
+
+### Phase 5D-B4 manual outbound scenarios
+
+**Scenario A — Website lead.** Prepare a `READY` task with `callObjective` `Bedarf für eine bessere Webseite prüfen und Beratung anbieten` and `offerFocus` `Website, KI-Assistent und Social Media`. Launch Emma from LeadFlow. Without customer speech, Emma must greet first, identify herself as the AI assistant calling for VS Web Studio, briefly explain the relevant reason, and ask one website-related question. She must not ask `Wie kann ich Ihnen helfen?`.
+
+**Scenario B — Interested customer.** Reply `Ja, unsere Webseite ist schon etwas alt.` Emma should explore one relevant point, reflect only what was actually said, explain one relevant benefit, and guide toward a consultation without immediately booking.
+
+**Scenario C — Soft objection.** Reply `Wir haben schon eine Webseite.` Emma should acknowledge that and ask one useful diagnostic question, such as whether more inquiries or a simpler contact process would be valuable, rather than immediately ending.
+
+**Scenario D — Hard stop.** Reply `Kein Interesse. Bitte rufen Sie nicht mehr an.` Emma must stop selling immediately, ask no further sales question, close politely, and make no unsupported CRM-storage claim.
+
+**Scenario E — Meeting.** Show genuine interest. Emma should gather enough context, check real Calendar availability, offer only verified slots, repeat the chosen time/mode, and call `bookMeeting` only after explicit confirmation. Success may be stated only after the tool returns `status=confirmed` and `externalActionPerformed=true`.
 
 ## Manual LeadFlow integration test
 
@@ -280,8 +305,9 @@ Logs contain tool names, coarse statuses, and action types only. They do not con
 - Attendee invitations and customer email notifications are not implemented.
 - A callback writeback records confirmed facts in LeadFlow, but LeadFlow alone decides whether the evidence changes CRM status.
 - Normal LeadFlow launches resolve the canonical lead automatically. Manual ID entry remains disabled unless the explicit development-only flag and URL mode are both enabled.
+- `INBOUND_RECEPTION` is reserved for a later phase; inbound receiving, SIP routing, and telephony are not implemented.
 - Real LeadFlow connectivity is not proven by automated tests and requires Vladyslav's explicit manual integration test.
 
 ## Requirements for Phase 5D-C
 
-Phase 5D-C can add structured feedback writeback to the bound CallTask. It must use the authenticated session's canonical `callTaskId` (never a model/browser ID), define a strict versioned feedback contract, preserve idempotency and canonical `leadId` writeback, validate that the task still belongs to the lead, and let LeadFlow own task lifecycle transitions. It should add explicit outcome/evidence validation, sanitized failure behavior, task/lead mismatch tests, replay/conflict tests, and manual verification. Twilio/SIP, dialing, `DIALING` transition, automatic task completion, bulk calls, Gmail, fuzzy lookup, and lead creation remain out of scope.
+Phase 5D-C can add structured feedback writeback to the bound CallTask. It must use the authenticated session's canonical `callTaskId` (never a model/browser ID), define a strict versioned feedback contract, preserve idempotency and canonical `leadId` writeback, validate that the task still belongs to the lead, and let LeadFlow own task lifecycle transitions. Feedback should preserve the server-derived conversation mode and distinguish prepared outbound evidence without allowing the model/browser to choose a mode or task. It should add explicit outcome/evidence validation, sanitized failure behavior, task/lead mismatch tests, replay/conflict tests, hard-stop/DO_NOT_CONTACT evidence tests, and manual verification. Twilio/SIP, dialing, `DIALING` transition, automatic task completion, bulk calls, Gmail, fuzzy lookup, lead creation, and inbound reception remain out of scope.

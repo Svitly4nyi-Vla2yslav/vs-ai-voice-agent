@@ -1,4 +1,5 @@
 import { startLiveConversation } from "/live-client.js";
+import { createOutboundOpeningRequester } from "/outbound-opening.js";
 
 const startButton = document.querySelector("#start");
 const endButton = document.querySelector("#end");
@@ -13,6 +14,7 @@ const toolActivityElement = document.querySelector("#tool-activity");
 const leadFlowLeadIdInput = document.querySelector("#leadflow-lead-id");
 const leadFlowStatusElement = document.querySelector("#leadflow-status");
 const leadFlowContextElement = document.querySelector("#leadflow-context");
+const leadFlowModeElement = document.querySelector("#leadflow-mode");
 const leadFlowCompanyElement = document.querySelector("#leadflow-company");
 const leadFlowContactRow = document.querySelector("#leadflow-contact-row");
 const leadFlowContactElement = document.querySelector("#leadflow-contact");
@@ -87,6 +89,7 @@ const initializeLeadFlowContext = async () => {
   manualFallbackActive = false;
   startButton.disabled = true;
   leadFlowContextElement.hidden = true;
+  leadFlowModeElement.textContent = "";
   leadFlowCompanyElement.textContent = "";
   leadFlowContactElement.textContent = "";
   leadFlowContactRow.hidden = true;
@@ -128,11 +131,16 @@ const initializeLeadFlowContext = async () => {
         !body?.ok ||
         typeof body.sessionToken !== "string" ||
         typeof body.context?.company !== "string" ||
+        body.context?.conversationMode !== "OUTBOUND_SALES" ||
         body.context?.callStatus !== "Ready"
       ) {
         throw new Error("handoff-failed");
       }
-      activeLeadFlowContext = { leadFlowSession: body.sessionToken };
+      activeLeadFlowContext = {
+        leadFlowSession: body.sessionToken,
+        conversationMode: body.context.conversationMode,
+      };
+      leadFlowModeElement.textContent = "Outbound";
       leadFlowCompanyElement.textContent = body.context.company;
       leadFlowCallStatusElement.textContent = body.context.callStatus;
       if (typeof body.context.contactPerson === "string") {
@@ -411,9 +419,17 @@ const startConversation = async () => {
 
     const channel = connection.createDataChannel("oai-events");
     eventChannel = channel;
+    const outboundOpening = createOutboundOpeningRequester((clientEvent) => {
+      if (eventChannel !== channel || channel.readyState !== "open") return;
+      channel.send(JSON.stringify(clientEvent));
+    });
     channel.addEventListener("open", () => {
       if (eventChannel === channel) {
-        setStatus("Listening");
+        if (outboundOpening.request(leadFlowContext.conversationMode)) {
+          setStatus("AI speaking");
+        } else {
+          setStatus("Listening");
+        }
       }
     });
     channel.addEventListener("message", (event) => {

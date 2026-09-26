@@ -1,3 +1,5 @@
+import { createOutboundOpeningRequester } from "/outbound-opening.js";
+
 const loggedLiveEvents = new Set([
   "session.started",
   "session.closed",
@@ -54,6 +56,7 @@ export const startLiveConversation = async ({
     }
     channel.send(JSON.stringify(clientEvent));
   };
+  const outboundOpening = createOutboundOpeningRequester(sendLiveEvent);
 
   const executeToolCall = async (item) => {
     if (
@@ -287,7 +290,11 @@ export const startLiveConversation = async ({
         logLiveEvent(serverEvent);
 
         if (serverEvent.type === "session.started") {
-          setStatus("Listening");
+          if (outboundOpening.request(leadFlowContext?.conversationMode)) {
+            setStatus("AI speaking");
+          } else {
+            setStatus("Listening");
+          }
         } else if (serverEvent.type === "session.input_transcript.delta") {
           setStatus("Listening");
         } else if (serverEvent.type === "session.output_transcript.delta") {

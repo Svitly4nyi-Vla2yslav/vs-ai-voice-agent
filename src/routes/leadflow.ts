@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 
+import { OUTBOUND_SALES_CONVERSATION_MODE } from "../agent/types.js";
 import { env, runtimeEnvironment } from "../config/env.js";
 import { isSameOriginRequest } from "../http/same-origin.js";
 import {
@@ -90,6 +91,7 @@ leadFlowRouter.post("/api/leadflow/handoff", async (request, response) => {
     ok: true,
     sessionToken,
     context: {
+      conversationMode: OUTBOUND_SALES_CONVERSATION_MODE,
       company: result.data.lead.company,
       contactPerson: result.data.lead.contactPerson,
       callStatus: "Ready",

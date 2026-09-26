@@ -6,6 +6,13 @@ export const voiceLabVoices = ["shimmer", "coral", "marin"] as const;
 
 export type VoiceLabVoice = (typeof voiceLabVoices)[number];
 
+// INBOUND_RECEPTION can be added here in a later phase without changing how
+// authenticated session context selects and supplies a conversation mode.
+export const OUTBOUND_SALES_CONVERSATION_MODE = "OUTBOUND_SALES" as const;
+export const conversationModes = [OUTBOUND_SALES_CONVERSATION_MODE] as const;
+
+export type ConversationMode = (typeof conversationModes)[number];
+
 export const salesConversationStates = [
   "OPENING",
   "DISCOVERY",
