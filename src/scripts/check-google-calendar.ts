@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import { DateTime, IANAZone } from "luxon";
 
+import { validateBookingCalendarConfiguration } from "../config/booking-calendar.js";
 import {
   CALENDAR_TIMEZONE,
   CalendarProviderError,
@@ -20,24 +21,24 @@ const clientId = value("GOOGLE_CLIENT_ID");
 const clientSecret = value("GOOGLE_CLIENT_SECRET");
 const refreshToken = value("GOOGLE_REFRESH_TOKEN");
 const configuredTimezone = value("CALENDAR_TIMEZONE") ?? CALENDAR_TIMEZONE;
-const safeCalendarName = (summary: string | undefined): string =>
-  summary?.replace(/[\u0000-\u001f\u007f]/gu, " ").trim().slice(0, 120) ||
-  "accessible";
+const EXPECTED_CALENDAR_NAME = "VS Web Studio Booking";
+const bookingCalendarConfiguration = validateBookingCalendarConfiguration(
+  calendarId,
+  { requireDedicated: true },
+);
 
 console.log("Google Calendar diagnostics\n");
-console.log("Environment:");
-console.log(`GOOGLE_CALENDAR_ID: ${calendarId ? "configured" : "missing"}`);
+console.log(
+  `Calendar configuration: ${calendarId && clientId && clientSecret && refreshToken ? "present" : "missing"}`,
+);
 console.log(`GOOGLE_CLIENT_ID: ${clientId ? "configured" : "missing"}`);
 console.log(`GOOGLE_CLIENT_SECRET: ${clientSecret ? "configured" : "missing"}`);
 console.log(`GOOGLE_REFRESH_TOKEN: ${refreshToken ? "configured" : "missing"}`);
 
-if (calendarId === "primary") {
-  console.warn(
-    "GOOGLE_CALENDAR_ID points to primary. Personal busy events will block customer bookings. VS Web Studio should use its dedicated booking calendar.",
-  );
-}
-
-if (!calendarId || !clientId || !clientSecret || !refreshToken) {
+if (bookingCalendarConfiguration.status === "primary_calendar_not_allowed") {
+  console.error("Dedicated booking calendar required");
+  process.exitCode = 1;
+} else if (!calendarId || !clientId || !clientSecret || !refreshToken) {
   console.error("\nDiagnostics stopped: configuration_error.");
   process.exitCode = 1;
 } else if (
@@ -47,6 +48,7 @@ if (!calendarId || !clientId || !clientSecret || !refreshToken) {
   console.error("\nDiagnostics stopped: configuration_error (invalid timezone).");
   process.exitCode = 1;
 } else {
+  console.log("Dedicated booking calendar: OK");
   const settings: CalendarSettings = {
     calendarId,
     timezone: CALENDAR_TIMEZONE,
@@ -81,8 +83,14 @@ if (!calendarId || !clientId || !clientSecret || !refreshToken) {
   if (!process.exitCode) {
     try {
       const calendar = await gateway.checkCalendarAccess();
-      console.log(`Configured calendar: ${safeCalendarName(calendar.summary)}`);
       console.log("Configured calendar access: OK");
+      if (calendar.summary === EXPECTED_CALENDAR_NAME) {
+        console.log("Booking calendar display name: OK");
+      } else {
+        console.warn(
+          "Booking calendar display name differs from the recommended name; the configured ID remains authoritative.",
+        );
+      }
     } catch (error) {
       console.error("Configured calendar access: FAILED (calendar_not_accessible)");
       process.exitCode = 1;

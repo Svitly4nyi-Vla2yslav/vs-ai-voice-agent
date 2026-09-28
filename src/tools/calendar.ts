@@ -1,7 +1,8 @@
 import { DateTime } from "luxon";
 import { z } from "zod";
 
-import { env } from "../config/env.js";
+import { validateBookingCalendarConfiguration } from "../config/booking-calendar.js";
+import { env, runtimeEnvironment } from "../config/env.js";
 import {
   CALENDAR_TIMEZONE,
   MEETING_MODES,
@@ -315,11 +316,26 @@ export type UpdateMeetingDetailsInput = z.infer<
 >;
 
 let calendarService: GoogleCalendarService | undefined;
+let calendarConfigurationFailure:
+  | "configuration"
+  | "dedicated_booking_calendar_required" = "configuration";
 
 const getConfiguredCalendarService = (): GoogleCalendarService | undefined => {
   if (calendarService) return calendarService;
+  const bookingCalendarConfiguration = validateBookingCalendarConfiguration(
+    env.GOOGLE_CALENDAR_ID,
+    { requireDedicated: runtimeEnvironment() !== "development" },
+  );
+  if (bookingCalendarConfiguration.status !== "configured") {
+    calendarConfigurationFailure =
+      bookingCalendarConfiguration.status === "primary_calendar_not_allowed"
+        ? "dedicated_booking_calendar_required"
+        : "configuration";
+    return undefined;
+  }
+  const bookingCalendarId = env.GOOGLE_CALENDAR_ID;
+  if (!bookingCalendarId) return undefined;
   if (
-    !env.GOOGLE_CALENDAR_ID ||
     !env.GOOGLE_CLIENT_ID ||
     !env.GOOGLE_CLIENT_SECRET ||
     !env.GOOGLE_REFRESH_TOKEN
@@ -328,7 +344,7 @@ const getConfiguredCalendarService = (): GoogleCalendarService | undefined => {
   }
 
   const settings: CalendarSettings = {
-    calendarId: env.GOOGLE_CALENDAR_ID,
+    calendarId: bookingCalendarId,
     timezone: env.CALENDAR_TIMEZONE,
     workingHoursStart: env.CALENDAR_WORKING_HOURS_START,
     workingHoursEnd: env.CALENDAR_WORKING_HOURS_END,
@@ -350,7 +366,7 @@ const getConfiguredCalendarService = (): GoogleCalendarService | undefined => {
 
 const notConfigured = () => ({
   status: "calendar_error" as const,
-  reason: "configuration" as const,
+  reason: calendarConfigurationFailure,
   externalActionPerformed: false as const,
 });
 
@@ -366,7 +382,8 @@ const withCalendarDiagnostic = <T extends { status: string }>(
     result.status === "calendar_error"
       ? reason === "unavailable"
         ? "provider_unavailable"
-        : reason === "configuration"
+        : reason === "configuration" ||
+            reason === "dedicated_booking_calendar_required"
           ? "configuration_error"
           : reason === "authentication"
             ? "authentication_error"

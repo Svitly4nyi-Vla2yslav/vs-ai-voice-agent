@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { validateBookingCalendarConfiguration } from "../config/booking-calendar.js";
 import {
   GoogleCalendarService,
   type BusyPeriod,
@@ -157,13 +158,33 @@ const gateway = new MockCalendarGateway();
 const personalCalendarGateway = new MockCalendarGateway();
 const service = new GoogleCalendarService(gateway, settings);
 
-const available = await service.getAvailability(availabilityInput);
+personalCalendarGateway.busyPeriods = [
+  {
+    start: "2026-09-25T14:00:00+02:00",
+    end: "2026-09-25T14:30:00+02:00",
+  },
+];
+personalCalendarGateway.events.set("private-duolingo", {
+  id: "private-duolingo",
+  summary: "Duolingo",
+  description: "German voice practice",
+  start: "2026-09-25T14:00:00+02:00",
+  end: "2026-09-25T14:30:00+02:00",
+  hasConference: false,
+  recurring: false,
+  privateProperties: {},
+});
+const personalConflictInput = {
+  ...availabilityInput,
+  startTime: "14:00",
+} as const;
+const available = await service.getAvailability(personalConflictInput);
 assert.equal(available.status, "available");
 assert.deepEqual(
   available.status === "available" ? available.requestedSlot : null,
   {
-    start: "2026-09-25T15:00:00+02:00",
-    end: "2026-09-25T15:30:00+02:00",
+    start: "2026-09-25T14:00:00+02:00",
+    end: "2026-09-25T14:30:00+02:00",
   },
 );
 assert.equal(gateway.busyQueryCount, 1, "configured booking calendar is queried once");
@@ -172,14 +193,20 @@ assert.equal(
   0,
   "an unrelated personal calendar gateway must never be queried",
 );
+assert.equal(
+  JSON.stringify(available).includes("Duolingo") ||
+    JSON.stringify(available).includes("German voice practice"),
+  false,
+  "personal titles and descriptions must never enter availability results",
+);
 
 gateway.busyPeriods = [
   {
-    start: "2026-09-25T15:00:00+02:00",
-    end: "2026-09-25T15:30:00+02:00",
+    start: "2026-09-25T14:00:00+02:00",
+    end: "2026-09-25T14:30:00+02:00",
   },
 ];
-const unavailable = await service.getAvailability(availabilityInput);
+const unavailable = await service.getAvailability(personalConflictInput);
 assert.equal(unavailable.status, "unavailable");
 assert.ok(
   unavailable.status === "unavailable" && unavailable.alternatives.length > 0,
@@ -189,6 +216,22 @@ assert.ok(
   JSON.stringify(unavailable).includes("private") === false,
   "availability result must contain no private event data",
 );
+
+assert.deepEqual(
+  validateBookingCalendarConfiguration("primary", { requireDedicated: true }),
+  { status: "primary_calendar_not_allowed" },
+  "production-like configuration must reject the primary calendar",
+);
+assert.deepEqual(
+  validateBookingCalendarConfiguration("vs-web-studio-booking", {
+    requireDedicated: true,
+  }),
+  { status: "configured" },
+  "an explicit dedicated calendar ID must be accepted",
+);
+assert.deepEqual(validateBookingCalendarConfiguration(undefined), {
+  status: "configuration_missing",
+});
 
 const outsideHours = await service.getAvailability({
   ...availabilityInput,
@@ -315,6 +358,16 @@ assert.equal(gateway.insertCount, 0);
 const firstBooking = await service.bookMeeting(bookingInput);
 assert.equal(firstBooking.status, "confirmed");
 assert.equal(gateway.insertCount, 1);
+assert.equal(
+  personalCalendarGateway.insertCount,
+  0,
+  "booking must never write to an unrelated personal calendar",
+);
+assert.equal(
+  gateway.insertedEvents[0]?.privateProperties.vsAiSource,
+  "emma",
+  "bookings must preserve Emma ownership metadata",
+);
 assert.equal(firstBooking.status === "confirmed" ? firstBooking.meetingMode : null, "GOOGLE_MEET");
 assert.ok(firstBooking.status === "confirmed" && firstBooking.meetUrl);
 assert.ok(gateway.insertedEvents[0]?.conferenceRequestId, "Meet creation request is required");
@@ -710,6 +763,11 @@ const cancelled = await lifecycleService.cancelMeeting({
 });
 assert.equal(cancelled.status, "cancelled");
 assert.equal(lifecycleGateway.deleteCount, 1);
+assert.equal(
+  personalCalendarGateway.deleteCount,
+  0,
+  "cancellation must never touch an unrelated personal calendar",
+);
 const repeatedCancel = await lifecycleService.cancelMeeting({
   meetingRef,
   confirmation: true,

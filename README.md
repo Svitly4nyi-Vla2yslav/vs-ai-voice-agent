@@ -69,7 +69,7 @@ The timezone is `Europe/Berlin`. Luxon handles UTC offsets and daylight-saving t
 - 30-minute customer-to-customer buffer
 - at most three alternatives
 
-Production should use a dedicated Google Calendar named **VS Web Studio Booking**. Set `GOOGLE_CALENDAR_ID` to that calendar's ID, not `primary`. Every availability check, booking, managed-meeting lookup, reschedule, and cancellation is scoped exclusively to the configured calendar; the application does not additionally read the primary calendar.
+Production requires a dedicated Google Calendar named **VS Web Studio Booking**. Set `GOOGLE_CALENDAR_ID` to that calendar's ID, never `primary`. Production, deploy-preview, and branch-deploy runtimes fail closed with the sanitized reason `dedicated_booking_calendar_required` when `primary` is configured. Every availability check, booking, managed-meeting lookup, reschedule, cancellation, and details update is scoped exclusively to the configured calendar; the application does not additionally read or merge the primary calendar.
 
 This intentionally means personal appointments and tasks do not block VS Web Studio customer appointments. Only busy events in the dedicated booking calendar participate in customer availability, while customer appointments in that calendar continue to block one another.
 
@@ -162,7 +162,7 @@ npm run check:openai
 
 `check:calendar` uses a mock Google gateway. It never calls Google and never creates real events. It covers dedicated-calendar isolation, the exact 30-minute buffer boundary, rich Google Meet/phone/in-person bookings, Meet creation requests, validation, provider-filtered Emma lookup, details updates and mode transitions, ownership rejection, rescheduling with detail preservation, idempotency, cancellation, and repeated cancellation.
 
-`check:google-calendar` is a read-only live diagnostic. It reports only whether the four Google settings are present, OAuth authentication succeeds, the configured calendar name/access are available, free/busy works, and the timezone is valid. It never prints IDs, credentials, tokens, or event data and never creates, updates, moves, or deletes events. If `GOOGLE_CALENDAR_ID` is `primary`, it prints a warning without failing the application.
+`check:google-calendar` is a read-only live diagnostic. It reports only whether the four Google settings are present, a dedicated ID is configured, OAuth authentication succeeds, the configured calendar name/access are available, free/busy works, and the timezone is valid. It never prints IDs, credentials, tokens, or event data and never creates, updates, moves, or deletes events. If `GOOGLE_CALENDAR_ID` is `primary`, it exits with `Dedicated booking calendar required` before making a Google API call. Display-name matching is advisory only; the configured calendar ID remains authoritative if the calendar is renamed.
 
 Run locally with:
 
@@ -253,7 +253,22 @@ npm run calendar:lifecycle-test -- --confirm-write --start=2026-09-25T15:00:00+0
 
 Without `--confirm-write` the script refuses all writes. With the flag it creates **[TEST] VS Web Studio – AI Lifecycle**, verifies the Emma marker, finds it through the managed lookup, reschedules and verifies it, cancels it, and verifies it no longer exists. This is the only verification that touches a real Calendar; automated checks remain mocked.
 
-### Phase 4D manual scenarios
+### Phase 4E dedicated-calendar manual scenarios
+
+**Personal-calendar isolation:**
+
+1. In Vladyslav's personal calendar, create or retain `14:00â€“14:30 Duolingo`.
+2. Keep `14:00â€“14:30` free in **VS Web Studio Booking**.
+3. Tell Emma: `14 Uhr passt mir.`
+4. Expected: Emma considers 14:00 available and may book it only after explicit confirmation. The Duolingo event remains untouched and is never mentioned to the customer.
+
+**Customer-to-customer conflict:**
+
+1. In **VS Web Studio Booking**, place Customer A at `14:00â€“14:30`.
+2. Have Customer B ask for 14:00.
+3. Expected: Emma reports that the slot is unavailable and proposes only alternatives returned by the backend. The configured customer-to-customer buffer still applies.
+
+Additional lifecycle scenarios:
 
 - **A — Customer priority:** choose a time busy only in Vladyslav's personal calendar. Emma should allow it because only **VS Web Studio Booking** is queried.
 - **B — Customer conflict:** place a booking-calendar event at 14:00–14:30. A 14:45 request must be unavailable; 15:00 must be available with the 30-minute buffer.

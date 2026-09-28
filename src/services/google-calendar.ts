@@ -273,7 +273,12 @@ export type UpdateMeetingDetailsResult =
 
 export type CalendarFailureResult = {
   status: "calendar_error";
-  reason: "configuration" | "authentication" | "rate_limited" | "unavailable";
+  reason:
+    | "configuration"
+    | "dedicated_booking_calendar_required"
+    | "authentication"
+    | "rate_limited"
+    | "unavailable";
   externalActionPerformed: false;
 };
 
