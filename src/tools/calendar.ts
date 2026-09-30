@@ -13,8 +13,11 @@ import {
   type CancelMeetingResult,
   type CalendarSettings,
   type FindEmmaMeetingsResult,
+  type NextAvailableMeetingSlotsResult,
   type RescheduleMeetingResult,
   type UpdateMeetingDetailsResult,
+  type CalendarTranscriptMirrorResult,
+  type CalendarTranscriptSegment,
 } from "../services/google-calendar.js";
 
 const emptyToUndefined = (value: unknown): unknown =>
@@ -98,6 +101,22 @@ export const getCalendarAvailabilityInputSchema = z
 
 export type GetCalendarAvailabilityInput = z.infer<
   typeof getCalendarAvailabilityInputSchema
+>;
+
+export const getNextAvailableMeetingSlotsInputSchema = z
+  .object({
+    durationMinutes: z
+      .number()
+      .int()
+      .min(15)
+      .max(120)
+      .default(env.CALENDAR_DEFAULT_DURATION_MINUTES),
+    timezone: z.literal(CALENDAR_TIMEZONE).default(CALENDAR_TIMEZONE),
+  })
+  .strict();
+
+export type GetNextAvailableMeetingSlotsInput = z.infer<
+  typeof getNextAvailableMeetingSlotsInputSchema
 >;
 
 const zonedDateTimeSchema = z.string().refine((value) => {
@@ -407,8 +426,23 @@ export const getCalendarAvailability = async (
   return withCalendarDiagnostic("availability", result);
 };
 
+export const getNextAvailableMeetingSlots = async (
+  input: GetNextAvailableMeetingSlotsInput,
+): Promise<NextAvailableMeetingSlotsResult> => {
+  const service = getConfiguredCalendarService();
+  if (!service) return withCalendarDiagnostic("next_slots", notConfigured());
+  return withCalendarDiagnostic(
+    "next_slots",
+    await service.getNextAvailableMeetingSlots(input),
+  );
+};
+
 export const bookMeeting = async (
   input: BookMeetingInput,
+  context: {
+    callTaskId?: string | undefined;
+    conversationId?: string | undefined;
+  } = {},
 ): Promise<BookingResult> => {
   if (input.confirmation !== true) {
     return {
@@ -418,7 +452,24 @@ export const bookMeeting = async (
   }
   const service = getConfiguredCalendarService();
   if (!service) return withCalendarDiagnostic("booking", notConfigured());
-  return withCalendarDiagnostic("booking", await service.bookMeeting(input));
+  return withCalendarDiagnostic(
+    "booking",
+    await service.bookMeeting(input, context),
+  );
+};
+
+export const mirrorTranscriptToManagedMeeting = async (
+  context: { callTaskId: string; conversationId: string },
+  segments: CalendarTranscriptSegment[],
+): Promise<CalendarTranscriptMirrorResult> => {
+  const service = getConfiguredCalendarService();
+  if (!service) {
+    return {
+      status: "calendar_transcript_mirror_failed",
+      externalActionPerformed: false,
+    };
+  }
+  return service.mirrorTranscriptForConversation(context, segments);
 };
 
 export const findEmmaMeetings = async (

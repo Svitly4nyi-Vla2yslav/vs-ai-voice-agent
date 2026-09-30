@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  randomUUID,
+} from "node:crypto";
 import { z } from "zod";
 
 import {
@@ -48,6 +54,7 @@ const taskAwareSessionPayloadSchema = z
     sessionKind: z.literal("task-aware"),
     leadId: z.string().trim().min(1).max(200),
     callTaskId: z.string().trim().min(1).max(200),
+    conversationId: z.string().uuid(),
     company: z.string().trim().min(1).max(500),
     contactPerson: z.string().trim().min(1).max(500).nullable(),
     callBrief: sanitizedCallBriefSchema,
@@ -122,6 +129,7 @@ export const createLeadFlowSessionToken = (
     version: taskAware ? 2 : 1,
     ...(taskAware ? { sessionKind: "task-aware" } : {}),
     ...context,
+    ...(taskAware ? { conversationId: randomUUID() } : {}),
     issuedAt,
     expiresAt: issuedAt + LEADFLOW_SESSION_LIFETIME_SECONDS,
   });

@@ -9,6 +9,8 @@ import {
   findEmmaMeetingsInputSchema,
   getCalendarAvailability,
   getCalendarAvailabilityInputSchema,
+  getNextAvailableMeetingSlots,
+  getNextAvailableMeetingSlotsInputSchema,
   rescheduleMeeting,
   rescheduleMeetingInputSchema,
   updateMeetingDetails,
@@ -118,6 +120,28 @@ export const getCalendarAvailabilityToolDefinition = {
       "durationMinutes",
       "timezone",
     ],
+  },
+} satisfies FunctionTool;
+
+export const getNextAvailableMeetingSlotsToolDefinition = {
+  type: "function",
+  name: "getNextAvailableMeetingSlots",
+  description:
+    "Return up to three earliest valid future customer booking slots when the customer explicitly has no date/time preference. Searches only the dedicated VS Web Studio Booking calendar across the next ten business days.",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      durationMinutes: {
+        type: "integer",
+        minimum: 15,
+        maximum: 120,
+        description: "Meeting duration; use 30 when the customer gave none.",
+      },
+      timezone: { type: "string", enum: ["Europe/Berlin"] },
+    },
+    required: ["durationMinutes", "timezone"],
   },
 } satisfies FunctionTool;
 
@@ -369,6 +393,7 @@ const freezeJsonValue = (value: unknown): void => {
 const agentToolOrder = [
   "prepareNextStep",
   "getCalendarAvailability",
+  "getNextAvailableMeetingSlots",
   "bookMeeting",
   "findEmmaMeetings",
   "rescheduleMeeting",
@@ -380,6 +405,7 @@ const agentToolOrder = [
 const agentToolDefinitions = {
   prepareNextStep: prepareNextStepToolDefinition,
   getCalendarAvailability: getCalendarAvailabilityToolDefinition,
+  getNextAvailableMeetingSlots: getNextAvailableMeetingSlotsToolDefinition,
   bookMeeting: bookMeetingToolDefinition,
   findEmmaMeetings: findEmmaMeetingsToolDefinition,
   rescheduleMeeting: rescheduleMeetingToolDefinition,
@@ -419,6 +445,7 @@ export const executeAgentTool = async (
   context: {
     leadId?: string | undefined;
     callTaskId?: string | undefined;
+    conversationId?: string | undefined;
   } = {},
 ): Promise<AgentToolResult> => {
   const safeToolName = registeredToolNames.has(name) ? name : "unknown";
@@ -462,7 +489,15 @@ export const executeAgentTool = async (
       const parsed = bookMeetingInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
-      result = await bookMeeting(parsed.data);
+      result = await bookMeeting(parsed.data, {
+        callTaskId: context.callTaskId,
+        conversationId: context.conversationId,
+      });
+    } else if (name === "getNextAvailableMeetingSlots") {
+      const parsed = getNextAvailableMeetingSlotsInputSchema.safeParse(argumentsValue);
+      if (!parsed.success) return failure("invalid_arguments");
+      console.info("[Agent Tool] validated", { tool: name });
+      result = await getNextAvailableMeetingSlots(parsed.data);
     } else if (name === "findEmmaMeetings") {
       const parsed = findEmmaMeetingsInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");

@@ -58,7 +58,10 @@ toolsRouter.post("/api/tools/execute", async (request, response) => {
       leadId: resolvedContext?.leadId,
       ...(
         resolvedContext && "callTaskId" in resolvedContext
-          ? { callTaskId: resolvedContext.callTaskId }
+          ? {
+              callTaskId: resolvedContext.callTaskId,
+              conversationId: resolvedContext.conversationId,
+            }
           : {}
       ),
     },

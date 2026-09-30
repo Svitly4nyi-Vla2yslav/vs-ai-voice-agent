@@ -1,5 +1,7 @@
 import { startLiveConversation } from "/live-client.js";
-import { createOutboundOpeningRequester } from "/outbound-opening.js";
+import { createFirstSpeechGate } from "/outbound-opening.js";
+import { createTranscriptCheckpointManager } from "/transcript-checkpoint.js";
+import { createTranscriptCollector } from "/transcript-collector.js";
 
 const startButton = document.querySelector("#start");
 const endButton = document.querySelector("#end");
@@ -14,6 +16,8 @@ const toolActivityElement = document.querySelector("#tool-activity");
 const leadFlowLeadIdInput = document.querySelector("#leadflow-lead-id");
 const leadFlowStatusElement = document.querySelector("#leadflow-status");
 const backendCacheStatusElement = document.querySelector("#backend-cache-status");
+const transcriptElement = document.querySelector("#automatic-transcript");
+const transcriptStatusElement = document.querySelector("#transcript-status");
 const leadFlowContextElement = document.querySelector("#leadflow-context");
 const leadFlowModeElement = document.querySelector("#leadflow-mode");
 const leadFlowCompanyElement = document.querySelector("#leadflow-company");
@@ -40,6 +44,9 @@ let connectionAbortController;
 let connectionAttempt = 0;
 let activeLeadFlowContext;
 let manualFallbackActive = false;
+let activeTranscriptCollector;
+let activeTranscriptCheckpoints;
+let activeFirstSpeechGate;
 
 const loggedRealtimeEvents = new Set([
   "session.created",
@@ -68,6 +75,41 @@ const setLeadFlowStatus = (message) => {
 
 const setBackendCacheStatus = (message) => {
   backendCacheStatusElement.textContent = message;
+};
+
+const setTranscriptStatus = (message) => {
+  transcriptStatusElement.textContent = message;
+};
+
+const renderTranscript = () => {
+  const segments = activeTranscriptCollector?.snapshot().segments ?? [];
+  const turns = [];
+  for (const segment of segments) {
+    const previous = turns.at(-1);
+    if (previous?.speaker === segment.speaker) {
+      previous.text += segment.delta;
+    } else {
+      turns.push({ speaker: segment.speaker, text: segment.delta });
+    }
+  }
+  transcriptElement.replaceChildren();
+  for (const turn of turns) {
+    const row = document.createElement("p");
+    const label = document.createElement("strong");
+    label.textContent = turn.speaker === "CUSTOMER" ? "Customer: " : "Emma: ";
+    row.append(label, document.createTextNode(turn.text));
+    transcriptElement.append(row);
+  }
+  transcriptElement.scrollTop = transcriptElement.scrollHeight;
+};
+
+const noOpTranscriptCheckpoints = {
+  start() {},
+  noteChanged() {},
+  finalize() {
+    return Promise.resolve(false);
+  },
+  stop() {},
 };
 
 const leadFlowFailureMessage = (reason) => {
@@ -241,6 +283,8 @@ const logRealtimeEvent = (serverEvent) => {
 const updateStatusFromRealtimeEvent = (serverEvent) => {
   switch (serverEvent.type) {
     case "session.created":
+      setStatus("Listening");
+      break;
     case "session.updated":
       setStatus("Connected");
       break;
@@ -268,6 +312,8 @@ const updateStatusFromRealtimeEvent = (serverEvent) => {
 };
 
 const cleanup = () => {
+  activeFirstSpeechGate?.close();
+  void activeTranscriptCheckpoints?.finalize();
   connectionAttempt += 1;
   connectionAbortController?.abort();
   activeLiveConversation?.close();
@@ -280,6 +326,8 @@ const cleanup = () => {
   microphoneStream = undefined;
   eventChannel = undefined;
   peerConnection = undefined;
+  activeFirstSpeechGate = undefined;
+  activeTranscriptCheckpoints = undefined;
   remoteAudio.srcObject = null;
   modeSelect.disabled = false;
   voiceSelect.disabled = false;
@@ -349,6 +397,17 @@ const startConversation = async () => {
   const selectedMode = modeSelect.value;
   const selectedVoice = voiceSelect.value;
 
+  activeTranscriptCollector = createTranscriptCollector();
+  activeTranscriptCheckpoints = leadFlowContext.leadFlowSession
+    ? createTranscriptCheckpointManager({
+        collector: activeTranscriptCollector,
+        leadFlowSession: leadFlowContext.leadFlowSession,
+        onStatus: setTranscriptStatus,
+      })
+    : noOpTranscriptCheckpoints;
+  transcriptElement.replaceChildren();
+  setTranscriptStatus("Waiting for speech");
+
   try {
     setStatus("Connecting");
     if (selectedMode === "live") {
@@ -363,6 +422,13 @@ const startConversation = async () => {
         setLeadFlowStatus,
         setBackendCacheStatus,
         leadFlowContext,
+        transcriptCollector: activeTranscriptCollector,
+        transcriptCheckpoints: activeTranscriptCheckpoints,
+        renderTranscript,
+        onSilenceTimeout: () => {
+          cleanup();
+          setStatus("No speech detected – conversation ended");
+        },
         signal: abortController.signal,
       });
 
@@ -426,23 +492,99 @@ const startConversation = async () => {
 
     const channel = connection.createDataChannel("oai-events");
     eventChannel = channel;
-    const outboundOpening = createOutboundOpeningRequester((clientEvent) => {
-      if (eventChannel !== channel || channel.readyState !== "open") return;
-      channel.send(JSON.stringify(clientEvent));
+    const firstSpeechGate = createFirstSpeechGate({
+      conversationMode: leadFlowContext.conversationMode,
+      onFirstSpeech: () => {
+        if (eventChannel !== channel || channel.readyState !== "open") return;
+        channel.send(
+          JSON.stringify({
+            type: "session.update",
+            session: {
+              type: "realtime",
+              audio: {
+                input: {
+                  turn_detection: {
+                    type: "server_vad",
+                    create_response: true,
+                    interrupt_response: true,
+                  },
+                },
+              },
+            },
+          }),
+        );
+        channel.send(JSON.stringify({ type: "response.create" }));
+      },
+      onTimeout: () => {
+        cleanup();
+        setStatus("No speech detected – conversation ended");
+      },
     });
+    activeFirstSpeechGate = firstSpeechGate;
     channel.addEventListener("open", () => {
       if (eventChannel === channel) {
-        if (outboundOpening.request(leadFlowContext.conversationMode)) {
-          setStatus("AI speaking");
-        } else {
-          setStatus("Listening");
-        }
+        setStatus("Connecting");
       }
     });
     channel.addEventListener("message", (event) => {
       try {
         const serverEvent = JSON.parse(event.data);
         logRealtimeEvent(serverEvent);
+        if (serverEvent.type === "session.created") {
+          activeTranscriptCollector.markStarted();
+          activeTranscriptCheckpoints.start();
+          firstSpeechGate.start();
+          setStatus("Listening");
+        } else if (serverEvent.type === "conversation.item.created") {
+          activeTranscriptCollector.registerRealtimeItem(
+            serverEvent.item?.id,
+            serverEvent.previous_item_id,
+          );
+        } else if (
+          serverEvent.type ===
+          "conversation.item.input_audio_transcription.delta"
+        ) {
+          if (typeof serverEvent.delta === "string") {
+            activeTranscriptCollector.addRealtimeCustomerFragment(
+              serverEvent.item_id,
+              serverEvent.delta,
+            );
+            firstSpeechGate.observeTranscript(serverEvent.delta);
+            activeTranscriptCheckpoints.noteChanged();
+            renderTranscript();
+          }
+        } else if (
+          serverEvent.type ===
+          "conversation.item.input_audio_transcription.completed"
+        ) {
+          activeTranscriptCollector.finalizeRealtimeTurn(
+            "CUSTOMER",
+            serverEvent.item_id,
+            serverEvent.transcript,
+          );
+          firstSpeechGate.observeTranscript(serverEvent.transcript);
+          activeTranscriptCheckpoints.noteChanged();
+          renderTranscript();
+        } else if (
+          serverEvent.type === "response.output_audio_transcript.delta"
+        ) {
+          activeTranscriptCollector.addRealtimeEmmaFragment(
+            serverEvent.item_id,
+            serverEvent.delta,
+          );
+          activeTranscriptCheckpoints.noteChanged();
+          renderTranscript();
+        } else if (
+          serverEvent.type === "response.output_audio_transcript.done"
+        ) {
+          activeTranscriptCollector.finalizeRealtimeTurn(
+            "EMMA",
+            serverEvent.item_id,
+            serverEvent.transcript,
+          );
+          activeTranscriptCheckpoints.noteChanged();
+          renderTranscript();
+        }
         updateStatusFromRealtimeEvent(serverEvent);
       } catch {
         setStatus("Received an unreadable Realtime event.");

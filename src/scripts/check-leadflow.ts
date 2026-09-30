@@ -322,4 +322,58 @@ assert.equal(
   "ambiguous confirmed callback is rejected",
 );
 
-console.log("LeadFlow checks passed (client, contract, idempotency, errors, and Calendar mapping).");
+const transcriptCheckpoint = {
+  revision: 3,
+  state: "PARTIAL" as const,
+  startedAt: "2026-09-30T10:00:00.000Z",
+  segments: [
+    {
+      speaker: "CUSTOMER" as const,
+      delta: "Guten Tag",
+      startMs: 100,
+      endMs: 500,
+    },
+  ],
+};
+const transcriptBodies: string[] = [];
+let transcriptCalls = 0;
+const transcriptResult = await new LeadFlowClient({
+  baseUrl: "https://leadflow.example",
+  token: "transcript-server-secret",
+  createEventId: () => fixedEventId,
+  fetchImplementation: async (url, init) => {
+    assert.equal(
+      String(url),
+      "https://leadflow.example/api/integrations/voice-agent/call-transcript",
+    );
+    assert.equal(
+      new Headers(init?.headers).get("authorization"),
+      "Bearer transcript-server-secret",
+    );
+    transcriptBodies.push(String(init?.body));
+    transcriptCalls += 1;
+    if (transcriptCalls === 1) throw new Error("temporary transport failure");
+    return jsonResponse({ ok: true, duplicate: false }, 201);
+  },
+}).sendTranscript(
+  {
+    leadId: "lead-canonical",
+    callTaskId: "task-canonical",
+    conversationId: "00000000-0000-4000-8000-000000000123",
+  },
+  transcriptCheckpoint,
+);
+assert.equal(transcriptResult.ok, true);
+assert.equal(transcriptBodies.length, 2);
+const firstTranscriptPayload = JSON.parse(transcriptBodies[0] as string);
+const retriedTranscriptPayload = JSON.parse(transcriptBodies[1] as string);
+assert.equal(firstTranscriptPayload.eventId, retriedTranscriptPayload.eventId);
+assert.equal(firstTranscriptPayload.leadRef.leadId, "lead-canonical");
+assert.equal(firstTranscriptPayload.callTaskRef.callTaskId, "task-canonical");
+assert.equal(
+  firstTranscriptPayload.conversationId,
+  "00000000-0000-4000-8000-000000000123",
+);
+assert.deepEqual(firstTranscriptPayload.segments, transcriptCheckpoint.segments);
+
+console.log("LeadFlow checks passed (interaction/transcript contracts, canonical references, stable retry IDs, errors, and Calendar mapping).");

@@ -86,6 +86,7 @@ assert.deepEqual(
   [
     "prepareNextStep",
     "getCalendarAvailability",
+    "getNextAvailableMeetingSlots",
     "bookMeeting",
     "findEmmaMeetings",
     "rescheduleMeeting",

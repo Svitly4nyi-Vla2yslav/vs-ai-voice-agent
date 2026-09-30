@@ -27,6 +27,7 @@ const context = (
   sessionKind: "task-aware",
   leadId,
   callTaskId,
+  conversationId: "00000000-0000-4000-8000-000000000001",
   company,
   contactPerson: "Test Contact",
   callBrief: { callObjective },

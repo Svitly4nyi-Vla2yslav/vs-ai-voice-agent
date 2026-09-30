@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DateTime } from "luxon";
 
 import { validateBookingCalendarConfiguration } from "../config/booking-calendar.js";
 import {
@@ -38,6 +39,8 @@ class MockCalendarGateway implements CalendarGateway {
   detailsUpdateCount = 0;
   insertedEvents: CalendarEventToInsert[] = [];
   detailsUpdates: CalendarEventDetailsUpdate[] = [];
+  failDetailsUpdate = false;
+  includeUnmanagedInList = false;
 
   async authenticate(): Promise<void> {}
 
@@ -65,7 +68,9 @@ class MockCalendarGateway implements CalendarGateway {
 
   async listManagedEvents(): Promise<StoredCalendarEvent[]> {
     return [...this.events.values()].filter(
-      (event) => event.privateProperties.vsAiSource === "emma",
+      (event) =>
+        this.includeUnmanagedInList ||
+        event.privateProperties.vsAiSource === "emma",
     );
   }
 
@@ -95,6 +100,7 @@ class MockCalendarGateway implements CalendarGateway {
     eventId: string,
     update: CalendarEventDetailsUpdate,
   ): Promise<StoredCalendarEvent> {
+    if (this.failDetailsUpdate) throw new Error("simulated provider rejection");
     const existing = this.events.get(eventId);
     if (!existing) throw Object.assign(new Error("not found"), { code: 404 });
     this.detailsUpdateCount += 1;
@@ -776,4 +782,196 @@ const repeatedCancel = await lifecycleService.cancelMeeting({
 assert.equal(repeatedCancel.status, "not_found_or_already_cancelled");
 assert.equal(lifecycleGateway.deleteCount, 1);
 
-console.log("Calendar checks passed (dedicated-calendar isolation, 30-minute buffer boundary, rich Meet/phone/in-person bookings, managed find/reschedule/update/cancel lifecycle, conference transitions, privacy, ownership, confirmation, idempotency, metadata preservation).");
+const nearestGateway = new MockCalendarGateway();
+const nearestService = new GoogleCalendarService(nearestGateway, settings);
+const currentDaySlots = await nearestService.getNextAvailableMeetingSlots(
+  { durationMinutes: 30, timezone: "Europe/Berlin" },
+  DateTime.fromISO("2026-10-01T10:07:00+02:00", { setZone: true }),
+);
+assert.equal(currentDaySlots.status, "available");
+if (currentDaySlots.status === "available") {
+  assert.equal(currentDaySlots.slots[0]?.start, "2026-10-01T10:15:00+02:00");
+  assert.equal(currentDaySlots.slots.length, 3);
+}
+const exactQuarterSlots = await nearestService.getNextAvailableMeetingSlots(
+  { durationMinutes: 30, timezone: "Europe/Berlin" },
+  DateTime.fromISO("2026-10-01T10:15:00+02:00", { setZone: true }),
+);
+assert.equal(exactQuarterSlots.status, "available");
+if (exactQuarterSlots.status === "available") {
+  assert.equal(exactQuarterSlots.slots[0]?.start, "2026-10-01T10:30:00+02:00");
+}
+assert.equal(nearestGateway.busyQueryCount, 2);
+assert.equal(personalCalendarGateway.busyQueryCount, 0);
+
+const afterHoursSlots = await nearestService.getNextAvailableMeetingSlots(
+  { durationMinutes: 30, timezone: "Europe/Berlin" },
+  DateTime.fromISO("2026-10-02T18:00:00+02:00", { setZone: true }),
+);
+assert.equal(afterHoursSlots.status, "available");
+if (afterHoursSlots.status === "available") {
+  assert.equal(afterHoursSlots.slots[0]?.start, "2026-10-05T09:00:00+02:00");
+}
+const weekendSlots = await nearestService.getNextAvailableMeetingSlots(
+  { durationMinutes: 30, timezone: "Europe/Berlin" },
+  DateTime.fromISO("2026-10-03T10:00:00+02:00", { setZone: true }),
+);
+assert.equal(weekendSlots.status, "available");
+if (weekendSlots.status === "available") {
+  assert.equal(weekendSlots.slots[0]?.start, "2026-10-05T09:00:00+02:00");
+}
+
+const bufferedGateway = new MockCalendarGateway();
+bufferedGateway.busyPeriods = [
+  {
+    start: "2026-10-01T09:00:00+02:00",
+    end: "2026-10-01T09:30:00+02:00",
+  },
+];
+const bufferedService = new GoogleCalendarService(bufferedGateway, settings);
+const bufferedSlots = await bufferedService.getNextAvailableMeetingSlots(
+  { durationMinutes: 30, timezone: "Europe/Berlin" },
+  DateTime.fromISO("2026-10-01T08:30:00+02:00", { setZone: true }),
+);
+assert.equal(bufferedSlots.status, "available");
+if (bufferedSlots.status === "available") {
+  assert.equal(bufferedSlots.slots[0]?.start, "2026-10-01T10:00:00+02:00");
+}
+
+const transcriptGateway = new MockCalendarGateway();
+const transcriptService = new GoogleCalendarService(transcriptGateway, settings);
+const transcriptBookingInput = {
+  contactName: "Transcript Customer",
+  companyName: "Transcript GmbH",
+  start: "2026-10-01T14:00:00+02:00",
+  end: "2026-10-01T14:30:00+02:00",
+  timezone: "Europe/Berlin" as const,
+  meetingMode: "GOOGLE_MEET" as const,
+  confirmation: true as const,
+  idempotencyKey: "transcript-booking-1",
+};
+const transcriptBooking = await transcriptService.bookMeeting(
+  transcriptBookingInput,
+  {
+    callTaskId: "call-task-transcript-1",
+    conversationId: "00000000-0000-4000-8000-000000000123",
+  },
+);
+assert.equal(transcriptBooking.status, "confirmed");
+if (transcriptBooking.status !== "confirmed") {
+  throw new Error("Expected confirmed transcript booking");
+}
+const transcriptEventBefore = transcriptGateway.events.get(
+  transcriptBooking.calendarEventId,
+);
+assert.ok(transcriptEventBefore?.privateProperties.vsAiCallTaskRef);
+assert.equal(
+  JSON.stringify(transcriptEventBefore?.privateProperties).includes(
+    "call-task-transcript-1",
+  ),
+  false,
+  "canonical CallTask ID must be stored only as a derived private reference",
+);
+const crossTaskDuplicate = await transcriptService.bookMeeting(
+  transcriptBookingInput,
+  {
+    callTaskId: "unrelated-call-task",
+    conversationId: "00000000-0000-4000-8000-000000000999",
+  },
+);
+assert.equal(
+  crossTaskDuplicate.status,
+  "duplicate_conflict",
+  "an idempotency collision must not bind another task to the existing event",
+);
+const mirrorSegments = [
+  { speaker: "CUSTOMER" as const, delta: "Guten Tag" },
+  { speaker: "EMMA" as const, delta: "Guten Tag, mein Name ist Emma." },
+];
+const mirrored = await transcriptService.mirrorTranscriptForConversation(
+  {
+    callTaskId: "call-task-transcript-1",
+    conversationId: "00000000-0000-4000-8000-000000000123",
+  },
+  mirrorSegments,
+);
+assert.equal(mirrored.status, "mirrored");
+const transcriptEventAfter = transcriptGateway.events.get(
+  transcriptBooking.calendarEventId,
+);
+assert.equal(transcriptEventAfter?.summary, transcriptEventBefore?.summary);
+assert.equal(transcriptEventAfter?.start, transcriptEventBefore?.start);
+assert.equal(transcriptEventAfter?.end, transcriptEventBefore?.end);
+assert.match(
+  transcriptEventAfter?.description ?? "",
+  /--- Automatic call transcript ---[\s\S]*Customer:\nGuten Tag[\s\S]*Emma:/u,
+);
+const detailsUpdatesAfterMirror = transcriptGateway.detailsUpdateCount;
+const repeatedMirror = await transcriptService.mirrorTranscriptForConversation(
+  {
+    callTaskId: "call-task-transcript-1",
+    conversationId: "00000000-0000-4000-8000-000000000123",
+  },
+  mirrorSegments,
+);
+assert.equal(repeatedMirror.status, "already_mirrored");
+assert.equal(transcriptGateway.detailsUpdateCount, detailsUpdatesAfterMirror);
+
+const mismatchedTask = await transcriptService.mirrorTranscriptForConversation(
+  {
+    callTaskId: "unrelated-call-task",
+    conversationId: "00000000-0000-4000-8000-000000000123",
+  },
+  mirrorSegments,
+);
+assert.equal(mismatchedTask.status, "call_task_mismatch");
+assert.equal(transcriptGateway.detailsUpdateCount, detailsUpdatesAfterMirror);
+
+if (transcriptEventAfter) {
+  transcriptGateway.events.set(transcriptBooking.calendarEventId, {
+    ...transcriptEventAfter,
+    privateProperties: {
+      ...transcriptEventAfter.privateProperties,
+      vsAiSource: "unrelated-system",
+    },
+  });
+}
+transcriptGateway.includeUnmanagedInList = true;
+const unmanagedMirror = await transcriptService.mirrorTranscriptForConversation(
+  {
+    callTaskId: "call-task-transcript-1",
+    conversationId: "00000000-0000-4000-8000-000000000123",
+  },
+  [...mirrorSegments, { speaker: "EMMA" as const, delta: " Mehr Text" }],
+);
+assert.equal(unmanagedMirror.status, "not_managed_by_emma");
+assert.equal(transcriptGateway.detailsUpdateCount, detailsUpdatesAfterMirror);
+if (transcriptEventAfter) {
+  transcriptGateway.events.set(transcriptBooking.calendarEventId, transcriptEventAfter);
+}
+transcriptGateway.includeUnmanagedInList = false;
+
+const noMeetingMirror = await transcriptService.mirrorTranscriptForConversation(
+  {
+    callTaskId: "call-task-transcript-1",
+    conversationId: "00000000-0000-4000-8000-000000000999",
+  },
+  mirrorSegments,
+);
+assert.equal(noMeetingMirror.status, "no_matching_meeting");
+
+transcriptGateway.failDetailsUpdate = true;
+const failedMirror = await transcriptService.mirrorTranscriptForConversation(
+  {
+    callTaskId: "call-task-transcript-1",
+    conversationId: "00000000-0000-4000-8000-000000000123",
+  },
+  [...mirrorSegments, { speaker: "CUSTOMER" as const, delta: " Mehr Text" }],
+);
+assert.equal(failedMirror.status, "calendar_transcript_mirror_failed");
+assert.equal(
+  transcriptGateway.events.get(transcriptBooking.calendarEventId)?.description,
+  transcriptEventAfter?.description,
+);
+
+console.log("Calendar checks passed (dedicated-calendar isolation, nearest-slot business-day search, buffer/max-three policy, rich bookings, lifecycle, confirmation, CallTask binding, idempotent transcript mirror, and mirror-failure isolation).");

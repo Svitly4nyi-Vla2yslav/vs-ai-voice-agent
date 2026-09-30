@@ -238,6 +238,111 @@ export const voiceAgentInteractionV1Schema = z
 
 export type VoiceAgentInteractionV1 = z.infer<typeof voiceAgentInteractionV1Schema>;
 
+export const transcriptSpeakerSchema = z.enum(["CUSTOMER", "EMMA"]);
+
+export const transcriptSegmentSchema = z
+  .object({
+    speaker: transcriptSpeakerSchema,
+    delta: z.string().min(1).max(20_000),
+    startMs: z.number().int().nonnegative().optional(),
+    endMs: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.startMs !== undefined &&
+      value.endMs !== undefined &&
+      value.endMs < value.startMs
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["endMs"],
+        message: "Transcript segment end must not precede its start",
+      });
+    }
+  });
+
+export const voiceAgentTranscriptCheckpointInputSchema = z
+  .object({
+    revision: z.number().int().positive(),
+    state: z.enum(["PARTIAL", "FINAL"]),
+    startedAt: isoTimestamp,
+    endedAt: isoTimestamp.optional(),
+    segments: z.array(transcriptSegmentSchema).max(20_000),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.state === "FINAL" && !value.endedAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["endedAt"],
+        message: "FINAL transcript requires endedAt",
+      });
+    }
+    const characters = value.segments.reduce(
+      (total, segment) => total + segment.delta.length,
+      0,
+    );
+    if (characters > 1_000_000) {
+      context.addIssue({
+        code: "custom",
+        path: ["segments"],
+        message: "Transcript exceeds the validated text limit",
+      });
+    }
+  });
+
+export type VoiceAgentTranscriptCheckpointInput = z.infer<
+  typeof voiceAgentTranscriptCheckpointInputSchema
+>;
+
+export const voiceAgentTranscriptV1Schema = z
+  .object({
+    contractVersion: z.literal("1.0"),
+    eventId: z.string().uuid(),
+    source: z.literal("vs-ai-voice-agent"),
+    leadRef: z.object({ leadId: boundedText(200) }).strict(),
+    callTaskRef: z.object({ callTaskId: boundedText(200) }).strict(),
+    conversationId: z.string().uuid(),
+    revision: z.number().int().positive(),
+    state: z.enum(["PARTIAL", "FINAL"]),
+    startedAt: isoTimestamp,
+    endedAt: isoTimestamp.optional(),
+    segments: z.array(transcriptSegmentSchema).max(20_000),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.state === "FINAL" && !value.endedAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["endedAt"],
+        message: "FINAL transcript requires endedAt",
+      });
+    }
+    const characters = value.segments.reduce(
+      (total, segment) => total + segment.delta.length,
+      0,
+    );
+    if (characters > 1_000_000) {
+      context.addIssue({
+        code: "custom",
+        path: ["segments"],
+        message: "Transcript exceeds the validated text limit",
+      });
+    }
+  });
+
+export type VoiceAgentTranscriptV1 = z.infer<
+  typeof voiceAgentTranscriptV1Schema
+>;
+
+export const leadFlowTranscriptSuccessResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    duplicate: z.boolean().optional(),
+  })
+  .passthrough();
+
 export const leadFlowSuccessResponseSchema = z
   .object({
     ok: z.literal(true),

@@ -244,6 +244,13 @@ assert.equal(
   "canonical-task-123",
   "canonical CallTask ID is bound",
 );
+assert.match(
+  sessionContext && "conversationId" in sessionContext
+    ? sessionContext.conversationId
+    : "",
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+  "server-generated conversation ID is sealed into task-aware context",
+);
 assert.equal(sessionToken.includes("canonical-lead-123"), false, "raw ID is not exposed");
 assert.equal(sessionToken.includes("canonical-task-123"), false, "raw task ID is not exposed");
 assert.equal(
@@ -470,6 +477,15 @@ const secondContext = resolveLeadFlowToolContext(
     allowManualLeadId: false,
     now: new Date("2026-09-22T12:05:00.000Z"),
   },
+);
+assert.notEqual(
+  sessionContext && "conversationId" in sessionContext
+    ? sessionContext.conversationId
+    : undefined,
+  secondContext && "conversationId" in secondContext
+    ? secondContext.conversationId
+    : undefined,
+  "each server-created task-aware session gets its own conversation ID",
 );
 assert.equal(
   secondContext && "callTaskId" in secondContext

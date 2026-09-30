@@ -3,11 +3,15 @@ import { randomUUID } from "node:crypto";
 import {
   leadFlowHandoffResponseSchema,
   leadFlowSuccessResponseSchema,
+  leadFlowTranscriptSuccessResponseSchema,
   voiceAgentInteractionV1Schema,
+  voiceAgentTranscriptV1Schema,
   type LeadFlowHandoffResponse,
   type LeadFlowSuccessResponse,
   type SyncLeadFlowInteractionInput,
   type VoiceAgentInteractionV1,
+  type VoiceAgentTranscriptCheckpointInput,
+  type VoiceAgentTranscriptV1,
 } from "../contracts/leadflow.js";
 import { env } from "../config/env.js";
 
@@ -87,6 +91,10 @@ export type LeadFlowClientResult =
 export type LeadFlowHandoffResult =
   | { ok: true; data: LeadFlowHandoffResponse }
   | { ok: false; error: LeadFlowHandoffErrorCode };
+
+export type LeadFlowTranscriptResult =
+  | { ok: true; duplicate: boolean; eventId: string }
+  | { ok: false; error: LeadFlowErrorCode; eventId: string };
 
 type FetchImplementation = typeof fetch;
 
@@ -330,6 +338,26 @@ export class LeadFlowClient {
     });
   }
 
+  createTranscriptPayload(
+    context: {
+      leadId: string;
+      callTaskId: string;
+      conversationId: string;
+    },
+    input: VoiceAgentTranscriptCheckpointInput,
+    eventId = this.#options.createEventId(),
+  ): VoiceAgentTranscriptV1 {
+    return voiceAgentTranscriptV1Schema.parse({
+      contractVersion: "1.0",
+      eventId,
+      source: "vs-ai-voice-agent",
+      leadRef: { leadId: context.leadId },
+      callTaskRef: { callTaskId: context.callTaskId },
+      conversationId: context.conversationId,
+      ...input,
+    });
+  }
+
   async resolveHandoff(handoffToken: string): Promise<LeadFlowHandoffResult> {
     if (!this.#options.baseUrl || !this.#options.token) {
       return { ok: false, error: "configuration_missing" };
@@ -460,6 +488,80 @@ export class LeadFlowClient {
       }
     }
 
+    return { ok: false, error: "leadflow_unavailable", eventId };
+  }
+
+  async sendTranscript(
+    context: {
+      leadId: string;
+      callTaskId: string;
+      conversationId: string;
+    },
+    input: VoiceAgentTranscriptCheckpointInput,
+  ): Promise<LeadFlowTranscriptResult> {
+    const eventId = this.#options.createEventId();
+    if (!this.#options.baseUrl || !this.#options.token) {
+      return { ok: false, error: "configuration_missing", eventId };
+    }
+
+    let baseUrl: string;
+    let payload: VoiceAgentTranscriptV1;
+    try {
+      baseUrl = normalizeLeadFlowBaseUrl(this.#options.baseUrl);
+      payload = this.createTranscriptPayload(context, input, eventId);
+    } catch {
+      return { ok: false, error: "invalid_payload", eventId };
+    }
+
+    for (let attempt = 0; attempt <= this.#options.maxTransportRetries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.#options.timeoutMs);
+      try {
+        const response = await this.#options.fetchImplementation(
+          `${baseUrl}/api/integrations/voice-agent/call-transcript`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${this.#options.token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          },
+        );
+        if (!response.ok) {
+          const error = await errorFromStatus(response);
+          if (error === "leadflow_unavailable" && attempt < this.#options.maxTransportRetries) {
+            continue;
+          }
+          return { ok: false, error, eventId };
+        }
+        if (response.status === 204) {
+          return { ok: true, duplicate: false, eventId };
+        }
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch {
+          return { ok: false, error: "provider_error", eventId };
+        }
+        const parsed = leadFlowTranscriptSuccessResponseSchema.safeParse(body);
+        return parsed.success
+          ? { ok: true, duplicate: parsed.data.duplicate ?? false, eventId }
+          : { ok: false, error: "provider_error", eventId };
+      } catch {
+        const timedOut = controller.signal.aborted;
+        if (attempt < this.#options.maxTransportRetries) continue;
+        return {
+          ok: false,
+          error: timedOut ? "timeout" : "leadflow_unavailable",
+          eventId,
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
     return { ok: false, error: "leadflow_unavailable", eventId };
   }
 }

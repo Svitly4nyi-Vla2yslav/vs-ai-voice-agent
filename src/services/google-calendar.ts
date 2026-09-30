@@ -120,6 +120,35 @@ export type AvailabilityResult =
     }
   | CalendarFailureResult;
 
+export type NextAvailableMeetingSlotsInput = {
+  durationMinutes: number;
+  timezone: typeof CALENDAR_TIMEZONE;
+};
+
+export type NextAvailableMeetingSlotsResult =
+  | {
+      status: "available" | "unavailable";
+      slots: CalendarSlot[];
+      externalActionPerformed: false;
+    }
+  | CalendarFailureResult;
+
+export type CalendarTranscriptSegment = {
+  speaker: "CUSTOMER" | "EMMA";
+  delta: string;
+};
+
+export type CalendarTranscriptMirrorResult =
+  | { status: "mirrored" | "already_mirrored"; externalActionPerformed: boolean }
+  | {
+      status: "no_matching_meeting" | "not_managed_by_emma" | "call_task_mismatch";
+      externalActionPerformed: false;
+    }
+  | {
+      status: "calendar_transcript_mirror_failed";
+      externalActionPerformed: false;
+    };
+
 export type BookingInput = {
   contactName?: string | undefined;
   companyName?: string | undefined;
@@ -731,6 +760,12 @@ const findAlternatives = (
   return alternatives;
 };
 
+const nextQuarterHour = (value: DateTime): DateTime => {
+  const start = value.set({ second: 0, millisecond: 0 });
+  const remainder = start.minute % 15;
+  return start.plus({ minutes: remainder === 0 ? 15 : 15 - remainder });
+};
+
 const calendarFailure = (error: unknown): CalendarFailureResult => ({
   status: "calendar_error",
   reason:
@@ -762,6 +797,12 @@ const bookingHash = (input: BookingInput): string =>
     )
     .digest("hex");
 
+export type BookMeetingContext = {
+  callTaskId?: string | undefined;
+  conversationId?: string | undefined;
+  testTitle?: boolean | string | undefined;
+};
+
 const deterministicEventId = (
   calendarId: string,
   idempotencyKey: string,
@@ -769,6 +810,37 @@ const deterministicEventId = (
   `vsai${createHash("sha256")
     .update(`${calendarId}:${idempotencyKey}`)
     .digest("hex")}`;
+
+const privateContextReference = (kind: string, value: string): string =>
+  createHash("sha256").update(`${kind}:${value}`).digest("hex");
+
+const transcriptMarker = "--- Automatic call transcript ---";
+
+const transcriptDescription = (segments: CalendarTranscriptSegment[]): string => {
+  const turns: Array<{ speaker: "CUSTOMER" | "EMMA"; text: string }> = [];
+  for (const segment of segments) {
+    const previous = turns.at(-1);
+    if (previous?.speaker === segment.speaker) {
+      previous.text += segment.delta;
+    } else {
+      turns.push({ speaker: segment.speaker, text: segment.delta });
+    }
+  }
+  return [
+    transcriptMarker,
+    ...turns.flatMap((turn) => [
+      "",
+      turn.speaker === "CUSTOMER" ? "Customer:" : "Emma:",
+      turn.text,
+    ]),
+  ].join("\n");
+};
+
+const descriptionWithoutTranscript = (description: string | undefined): string => {
+  if (!description) return "";
+  const markerIndex = description.indexOf(`\n\n${transcriptMarker}`);
+  return markerIndex >= 0 ? description.slice(0, markerIndex) : description;
+};
 
 type MeetingDetails = {
   contactName?: string | undefined;
@@ -1028,6 +1100,81 @@ export class GoogleCalendarService {
         status: available ? "available" : "unavailable",
         requestedSlot,
         alternatives: available ? [] : alternatives,
+        externalActionPerformed: false,
+      };
+    } catch (error) {
+      return calendarFailure(error);
+    }
+  }
+
+  async getNextAvailableMeetingSlots(
+    input: NextAvailableMeetingSlotsInput,
+    now = DateTime.now().setZone(CALENDAR_TIMEZONE),
+  ): Promise<NextAvailableMeetingSlotsResult> {
+    const localNow = now.setZone(input.timezone);
+    const businessDays: DateTime[] = [];
+    let day = localNow.startOf("day");
+    while (businessDays.length < 10) {
+      if (day.weekday <= 5) businessDays.push(day);
+      day = day.plus({ days: 1 });
+    }
+
+    const firstDay = businessDays[0];
+    const lastDay = businessDays.at(-1);
+    if (!firstDay || !lastDay) {
+      return { status: "unavailable", slots: [], externalActionPerformed: false };
+    }
+
+    try {
+      const queryStart = timeOnDate(
+        firstDay.toFormat("yyyy-MM-dd"),
+        this.settings.workingHoursStart,
+        input.timezone,
+      ).minus({ minutes: this.settings.bufferMinutes });
+      const queryEnd = timeOnDate(
+        lastDay.toFormat("yyyy-MM-dd"),
+        this.settings.workingHoursEnd,
+        input.timezone,
+      ).plus({ minutes: this.settings.bufferMinutes });
+      const busyPeriods = await this.gateway.getBusyPeriods(
+        toIso(queryStart),
+        toIso(queryEnd),
+      );
+      const slots: CalendarSlot[] = [];
+
+      for (const businessDay of businessDays) {
+        const date = businessDay.toFormat("yyyy-MM-dd");
+        const workStart = timeOnDate(
+          date,
+          this.settings.workingHoursStart,
+          input.timezone,
+        );
+        const workEnd = timeOnDate(
+          date,
+          this.settings.workingHoursEnd,
+          input.timezone,
+        );
+        const rangeStart = businessDay.hasSame(localNow, "day")
+          ? DateTime.max(workStart, nextQuarterHour(localNow))
+          : workStart;
+        if (rangeStart.plus({ minutes: input.durationMinutes }) > workEnd) {
+          continue;
+        }
+        slots.push(
+          ...findAlternatives(
+            rangeStart,
+            workEnd,
+            input.durationMinutes,
+            busyPeriods,
+            this.settings.bufferMinutes,
+          ).slice(0, 3 - slots.length),
+        );
+        if (slots.length >= 3) break;
+      }
+
+      return {
+        status: slots.length > 0 ? "available" : "unavailable",
+        slots,
         externalActionPerformed: false,
       };
     } catch (error) {
@@ -1339,7 +1486,7 @@ export class GoogleCalendarService {
 
   async bookMeeting(
     input: BookingInput,
-    options: { testTitle?: boolean | string } = {},
+    options: BookMeetingContext = {},
   ): Promise<BookingResult> {
     if (input.confirmation !== true) {
       return {
@@ -1376,11 +1523,26 @@ export class GoogleCalendarService {
       this.settings.calendarId,
       input.idempotencyKey,
     );
+    const expectedCallTaskReference = options.callTaskId
+      ? privateContextReference("call-task", options.callTaskId)
+      : undefined;
+    const expectedConversationReference = options.conversationId
+      ? privateContextReference("conversation", options.conversationId)
+      : undefined;
+    const matchesBookingContext = (event: StoredCalendarEvent): boolean =>
+      (!expectedCallTaskReference ||
+        event.privateProperties.vsAiCallTaskRef === expectedCallTaskReference) &&
+      (!expectedConversationReference ||
+        event.privateProperties.vsAiConversationRef ===
+          expectedConversationReference);
 
     try {
       const existing = await this.gateway.getEvent(eventId);
       if (existing) {
-        if (existing.privateProperties.vsAiRequestHash !== requestHash) {
+        if (
+          existing.privateProperties.vsAiRequestHash !== requestHash ||
+          !matchesBookingContext(existing)
+        ) {
           return {
             status: "duplicate_conflict",
             externalActionPerformed: false,
@@ -1453,6 +1615,22 @@ export class GoogleCalendarService {
           vsAiRequestHash: requestHash,
           vsAiSource: "emma",
           vsAiMeetingMode: input.meetingMode,
+          ...(options.callTaskId
+            ? {
+                vsAiCallTaskRef: privateContextReference(
+                  "call-task",
+                  options.callTaskId,
+                ),
+              }
+            : {}),
+          ...(options.conversationId
+            ? {
+                vsAiConversationRef: privateContextReference(
+                  "conversation",
+                  options.conversationId,
+                ),
+              }
+            : {}),
           ...(input.meetingMode === "GOOGLE_MEET"
             ? { vsAiConferenceGeneration: "1" }
             : {}),
@@ -1479,7 +1657,8 @@ export class GoogleCalendarService {
           const existing = await this.gateway.getEvent(eventId);
           if (
             existing &&
-            existing.privateProperties.vsAiRequestHash === requestHash
+            existing.privateProperties.vsAiRequestHash === requestHash &&
+            matchesBookingContext(existing)
           ) {
             return {
               status: "confirmed",
@@ -1502,6 +1681,72 @@ export class GoogleCalendarService {
         }
       }
       return calendarFailure(error);
+    }
+  }
+
+  async mirrorTranscriptForConversation(
+    context: { callTaskId: string; conversationId: string },
+    segments: CalendarTranscriptSegment[],
+    now = DateTime.now().setZone(CALENDAR_TIMEZONE),
+  ): Promise<CalendarTranscriptMirrorResult> {
+    const taskReference = privateContextReference("call-task", context.callTaskId);
+    const conversationReference = privateContextReference(
+      "conversation",
+      context.conversationId,
+    );
+    const transcript = transcriptDescription(segments);
+    const transcriptHash = createHash("sha256").update(transcript).digest("hex");
+
+    try {
+      const events = await this.gateway.listManagedEvents(
+        toIso(now.minus({ days: 1 })),
+        toIso(now.plus({ days: 366 })),
+      );
+      const event = events.find(
+        (candidate) =>
+          candidate.privateProperties.vsAiConversationRef ===
+          conversationReference,
+      );
+      if (!event) {
+        return { status: "no_matching_meeting", externalActionPerformed: false };
+      }
+      if (managedEventStatus(event) !== "managed") {
+        return { status: "not_managed_by_emma", externalActionPerformed: false };
+      }
+      if (event.privateProperties.vsAiCallTaskRef !== taskReference) {
+        return { status: "call_task_mismatch", externalActionPerformed: false };
+      }
+      if (event.privateProperties.vsAiTranscriptHash === transcriptHash) {
+        return { status: "already_mirrored", externalActionPerformed: false };
+      }
+
+      const baseDescription = descriptionWithoutTranscript(event.description);
+      await this.gateway.updateEventDetails(event.id, {
+        summary: event.summary ?? "",
+        description: `${baseDescription}${baseDescription ? "\n\n" : ""}${transcript}`,
+        ...(event.location ? { location: event.location } : {}),
+        privateProperties: {
+          ...event.privateProperties,
+          vsAiTranscriptHash: transcriptHash,
+        },
+        conferenceAction: "preserve",
+      });
+      console.info("[Calendar] transcript mirror completed", {
+        segmentCount: segments.length,
+        characterCount: segments.reduce(
+          (total, segment) => total + segment.delta.length,
+          0,
+        ),
+      });
+      return { status: "mirrored", externalActionPerformed: true };
+    } catch {
+      console.warn("[Calendar] transcript mirror failed", {
+        status: "calendar_transcript_mirror_failed",
+      });
+      return {
+        status: "calendar_transcript_mirror_failed",
+        externalActionPerformed: false,
+      };
     }
   }
 }

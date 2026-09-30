@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { OUTBOUND_SALES_CONVERSATION_MODE } from "../agent/types.js";
+import { transcriptSegmentSchema } from "../contracts/leadflow.js";
 import { env, runtimeEnvironment } from "../config/env.js";
 import { isSameOriginRequest } from "../http/same-origin.js";
 import {
@@ -10,14 +11,47 @@ import {
 } from "../services/leadflow.js";
 import {
   createLeadFlowSessionToken,
+  readLeadFlowSessionToken,
   sanitizeCallBrief,
 } from "../services/leadflow-session.js";
+import { mirrorTranscriptToManagedMeeting } from "../tools/calendar.js";
 
 export const leadFlowRouter = Router();
 
 const handoffRequestSchema = z
   .object({ handoffToken: z.string().trim().min(1).max(8_192) })
   .strict();
+
+const transcriptCheckpointRequestSchema = z
+  .object({
+    leadFlowSession: z.string().trim().min(1).max(65_536),
+    revision: z.number().int().positive(),
+    state: z.enum(["PARTIAL", "FINAL"]),
+    startedAt: z.string().datetime({ offset: true }),
+    endedAt: z.string().datetime({ offset: true }).optional(),
+    segments: z.array(transcriptSegmentSchema).max(20_000),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.state === "FINAL" && !value.endedAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["endedAt"],
+        message: "FINAL transcript requires endedAt",
+      });
+    }
+    const characters = value.segments.reduce(
+      (total, segment) => total + segment.delta.length,
+      0,
+    );
+    if (characters > 1_000_000) {
+      context.addIssue({
+        code: "custom",
+        path: ["segments"],
+        message: "Transcript exceeds the validated text limit",
+      });
+    }
+  });
 
 leadFlowRouter.get("/api/leadflow/status", (_request, response) => {
   response.set("Cache-Control", "no-store");
@@ -97,5 +131,75 @@ leadFlowRouter.post("/api/leadflow/handoff", async (request, response) => {
       callStatus: "Ready",
       callObjective: result.data.callBrief.callObjective.slice(0, 240),
     },
+  });
+});
+
+leadFlowRouter.post("/api/leadflow/transcript", async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  if (!isSameOriginRequest(request)) {
+    response.status(403).json({ error: "Unexpected request origin" });
+    return;
+  }
+  const parsed = transcriptCheckpointRequestSchema.safeParse(request.body);
+  if (!parsed.success || !env.LEADFLOW_INTEGRATION_TOKEN) {
+    response.status(400).json({ error: "Invalid transcript checkpoint" });
+    return;
+  }
+  const session = readLeadFlowSessionToken(
+    parsed.data.leadFlowSession,
+    env.LEADFLOW_INTEGRATION_TOKEN,
+  );
+  if (!session || session.version !== 2) {
+    response.status(401).json({ error: "Invalid LeadFlow session" });
+    return;
+  }
+
+  const { leadFlowSession: _sessionToken, ...checkpoint } = parsed.data;
+  const persistence = await getLeadFlowClient().sendTranscript(
+    {
+      leadId: session.leadId,
+      callTaskId: session.callTaskId,
+      conversationId: session.conversationId,
+    },
+    checkpoint,
+  );
+  const characterCount = checkpoint.segments.reduce(
+    (total, segment) => total + segment.delta.length,
+    0,
+  );
+  if (!persistence.ok) {
+    console.warn("[Transcript] checkpoint failed", {
+      revision: checkpoint.revision,
+      state: checkpoint.state,
+      segmentCount: checkpoint.segments.length,
+      characterCount,
+      status: persistence.error,
+    });
+    response.status(502).json({ status: "persistence_failed" });
+    return;
+  }
+
+  let calendarMirrorStatus = "not_requested";
+  if (checkpoint.state === "FINAL" && checkpoint.segments.length > 0) {
+    const mirror = await mirrorTranscriptToManagedMeeting(
+      {
+        callTaskId: session.callTaskId,
+        conversationId: session.conversationId,
+      },
+      checkpoint.segments,
+    );
+    calendarMirrorStatus = mirror.status;
+  }
+  console.info("[Transcript] checkpoint persisted", {
+    revision: checkpoint.revision,
+    state: checkpoint.state,
+    segmentCount: checkpoint.segments.length,
+    characterCount,
+    duplicate: persistence.duplicate,
+    calendarMirrorStatus,
+  });
+  response.status(202).json({
+    status: persistence.duplicate ? "duplicate_accepted" : "persisted",
+    calendarMirrorStatus,
   });
 });

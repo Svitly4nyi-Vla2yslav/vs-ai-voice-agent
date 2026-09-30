@@ -68,6 +68,45 @@ button {
   margin-top: 0.5rem;
 }
 
+.transcript-panel {
+  margin-top: 1.5rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.transcript-heading-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid currentColor;
+}
+
+.transcript-heading-row h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+#transcript-status {
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.automatic-transcript {
+  min-height: 8rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.automatic-transcript p {
+  margin: 0 0 0.75rem;
+}
+
 .leadflow-context,
 .leadflow-dev-fallback {
   grid-column: 1 / -1;

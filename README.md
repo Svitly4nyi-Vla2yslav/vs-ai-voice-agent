@@ -2,14 +2,15 @@
 
 ## Current status
 
-**Prompt Cache Optimization — Phase 1.** `gpt-live-1` remains the conversational voice model. Its managed Responses backend now receives a deterministic global prefix and canonical tool definitions before verified session/customer context. `OPENAI_AGENT_MODEL` remains configurable and defaults to `gpt-5.4-mini`; `gpt-6-luna` is an opt-in A/B experiment, not an automatic production switch. See [the Phase 1 architecture and A/B checklist](docs/prompt-cache-phase-1.md).
+**Phase 5D-C2 plus Prompt Cache Optimization — Phase 1.** `gpt-live-1` remains the preferred conversational voice model, with Realtime as fallback. Outbound sessions now wait for intelligible customer transcript text before Emma's disclosed introduction, collect text-only transcripts with durable LeadFlow checkpoints, offer server-calculated nearest Calendar slots, and mirror a final transcript only into the matching Emma-managed meeting. See [the Phase 5D-C2 architecture and manual test](docs/phase-5d-c2-transcript-and-scheduling.md) and [the Prompt Cache Phase 1 architecture](docs/prompt-cache-phase-1.md).
 
-The verified task-aware LeadFlow session still selects `OUTBOUND_SALES` server-side. Emma initiates the first turn exactly once in both Live and Realtime, transparently identifies herself as the AI assistant of VS Web Studio, uses the verified Call Brief, and leads with one relevant discovery question. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5A/5C verified writeback and handoff behavior are preserved.
+The verified task-aware LeadFlow session still selects `OUTBOUND_SALES` server-side. Emma remains the business initiator but waits silently for the customer's first intelligible utterance, then identifies herself as the AI assistant of VS Web Studio, discloses automatic transcription, uses the verified Call Brief, and leads with one relevant discovery question. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5A/5C verified writeback and handoff behavior are preserved.
 
 The registered backend tools are:
 
 - `prepareNextStep` — preparation only for callbacks, information requests, human handoff, and initial meeting normalization.
 - `getCalendarAvailability` — reads sanitized Google Calendar free/busy data.
+- `getNextAvailableMeetingSlots` — returns up to three earliest valid slots across the next ten business days.
 - `bookMeeting` — creates a real consultation event only after explicit confirmation and a final availability re-check.
 - `findEmmaMeetings` — finds at most three sanitized Emma-created meeting candidates in a bounded window.
 - `rescheduleMeeting` — updates one selected Emma event only after availability is re-checked and the exact change is explicitly confirmed.
@@ -53,7 +54,7 @@ One logical writeback receives one application-generated UUID. A transport retry
 
 Conversation mode is an internal server-derived property, not a model/tool argument or authoritative browser parameter. A sealed version-2 task-aware LeadFlow session maps to `OUTBOUND_SALES`; legacy version-1 sessions, direct page access, and the developer lead-ID fallback map to no outbound mode. The architecture has one typed mode-selection boundary so a later phase can add `INBOUND_RECEPTION` without changing how verified context reaches Live and Realtime. This phase does not implement inbound calls, SIP, routing, or telephony.
 
-For `OUTBOUND_SALES`, the verified prompt says that Emma initiated the business call and must speak first. Her opening uses a greeting, transparent AI identity, the exact brand `VS Web Studio`, a concise natural reason derived from the Call Brief, and one targeted permission/discovery question. Generic receptionist openings such as `Wie kann ich Ihnen helfen?` are prohibited only in outbound mode. The browser requests one initial `response.create` after the relevant channel/session is ready; a per-conversation guard prevents repeated session/channel events and later tool responses from creating duplicate greetings. No fake customer speech or transcript is inserted.
+For `OUTBOUND_SALES`, Emma remains the initiator of the business purpose but waits silently until the first non-whitespace customer transcript. Her one-shot opening then uses a greeting, transparent AI identity, the exact brand `VS Web Studio`, the configurable automatic-transcription disclosure, a concise natural reason derived from the Call Brief, and one targeted permission/discovery question. Generic receptionist openings such as `Wie kann ich Ihnen helfen?` are prohibited only in outbound mode. A VAD/noise event alone cannot unlock the opening, and a 30-second application timer closes a still-silent session. No fake customer speech or transcript is inserted.
 
 `callObjective` is the primary call goal, but internal wording is transformed into natural conversation rather than read verbatim. `emmaFocus` and `offerFocus` help choose the first useful question and relevant value. `currentSituation`, `painPoints`, `auditProblem`, `proposedSolution`, `doNotMention`, and `operatorNote` remain untrusted preparation data. They can shape questions but are never treated as customer-confirmed facts. Mode rules are placed before the delimited untrusted JSON; CRM text cannot select or replace the conversation mode.
 
@@ -159,6 +160,8 @@ npm run check:google-calendar
 npm run check:leadflow
 npm run check:leadflow-handoff
 npm run check:outbound
+npm run check:first-speech
+npm run check:transcript
 npm run typecheck
 npm run build
 npm run check:openai
@@ -180,7 +183,7 @@ Run LeadFlow at `http://localhost:3001` and this Voice Agent at `http://localhos
 
 `check:leadflow-handoff` is fully mocked. It covers strict task-aware resolution, server-side Bearer authentication, canonical lead/task binding, model override rejection, Call Brief prompt injection without IDs, hostile CRM-text hierarchy, tamper/expiry rejection, missing/non-READY tasks, malformed/unknown brief fields, safe optionals, cross-session lead/task/brief isolation, explicit legacy/developer fallback, direct-open guidance, safe browser failure states, and writeback using the resolved lead ID.
 
-`check:outbound` verifies that unbound and future inbound-like contexts do not request an outbound opening, while Live and Realtime each request exactly one initial response even when their ready event repeats. The handoff suite additionally verifies server-derived mode selection, outbound opening instructions, inbound-phrase prohibition, hostile CRM mode-text isolation, Call Brief availability, and absence of lead/task IDs from prompt text.
+`check:outbound` and `check:first-speech` verify silent startup, transcript-only one-shot unlocking, whitespace/noise rejection, the 30-second timeout, permanent timer cancellation after speech, the disclosed outbound introduction, and preserved hard stops. `check:transcript` verifies Live and Realtime collection, exact delta spacing/timestamps, completed-turn replacement, ordering, PARTIAL/FINAL checkpoints, canonical sealed-session identifiers, empty suppression, and privacy-safe logging. The handoff suite additionally verifies server-derived mode selection, hostile CRM mode-text isolation, Call Brief availability, and absence of lead/task IDs from prompt text.
 
 ## Manual automatic-handoff end-to-end test
 
@@ -209,7 +212,7 @@ LeadFlow owns ID creation. The Voice Agent only consumes the canonical lead and 
 
 ### Phase 5D-B4 manual outbound scenarios
 
-**Scenario A — Website lead.** Prepare a `READY` task with `callObjective` `Bedarf für eine bessere Webseite prüfen und Beratung anbieten` and `offerFocus` `Website, KI-Assistent und Social Media`. Launch Emma from LeadFlow. Without customer speech, Emma must greet first, identify herself as the AI assistant calling for VS Web Studio, briefly explain the relevant reason, and ask one website-related question. She must not ask `Wie kann ich Ihnen helfen?`.
+**Scenario A — Website lead.** Prepare a `READY` task with `callObjective` `Bedarf für eine bessere Webseite prüfen und Beratung anbieten` and `offerFocus` `Website, KI-Assistent und Social Media`. Launch Emma from LeadFlow. Emma must stay silent until the customer says something intelligible such as `Hallo`; she then identifies herself as the AI assistant calling for VS Web Studio, discloses automatic transcription, briefly explains the relevant reason, and asks one website-related question. She must not ask `Wie kann ich Ihnen helfen?`.
 
 **Scenario B — Interested customer.** Reply `Ja, unsere Webseite ist schon etwas alt.` Emma should explore one relevant point, reflect only what was actually said, explain one relevant benefit, and guide toward a consultation without immediately booking.
 

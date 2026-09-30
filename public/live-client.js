@@ -1,4 +1,4 @@
-import { createOutboundOpeningRequester } from "/outbound-opening.js";
+import { createFirstSpeechGate } from "/outbound-opening.js";
 
 const loggedLiveEvents = new Set([
   "session.started",
@@ -41,6 +41,10 @@ export const startLiveConversation = async ({
   setLeadFlowStatus,
   setBackendCacheStatus,
   leadFlowContext,
+  transcriptCollector,
+  transcriptCheckpoints,
+  renderTranscript,
+  onSilenceTimeout,
   signal,
 }) => {
   let connection;
@@ -98,7 +102,15 @@ export const startLiveConversation = async ({
     }
     channel.send(JSON.stringify(clientEvent));
   };
-  const outboundOpening = createOutboundOpeningRequester(sendLiveEvent);
+  const firstSpeechGate = createFirstSpeechGate({
+    conversationMode: leadFlowContext?.conversationMode,
+    onFirstSpeech: () => setStatus("Listening"),
+    onTimeout: () => {
+      void transcriptCheckpoints.finalize();
+      close();
+      onSilenceTimeout();
+    },
+  });
 
   const executeToolCall = async (item) => {
     if (
@@ -117,6 +129,7 @@ export const startLiveConversation = async ({
     const registeredTools = new Set([
       "prepareNextStep",
       "getCalendarAvailability",
+      "getNextAvailableMeetingSlots",
       "bookMeeting",
       "findEmmaMeetings",
       "rescheduleMeeting",
@@ -127,6 +140,8 @@ export const startLiveConversation = async ({
     const isRegisteredTool = registeredTools.has(item.name);
     if (item.name === "getCalendarAvailability") {
       setToolActivity("Checking calendar");
+    } else if (item.name === "getNextAvailableMeetingSlots") {
+      setToolActivity("Finding next available slots");
     } else if (item.name === "bookMeeting") {
       setToolActivity("Booking requested");
     } else if (item.name === "findEmmaMeetings") {
@@ -281,6 +296,7 @@ export const startLiveConversation = async ({
   const close = () => {
     if (closed) return;
     closed = true;
+    firstSpeechGate.close();
     clearTimeout(speakingTimer);
     signal?.removeEventListener("abort", close);
 
@@ -335,18 +351,33 @@ export const startLiveConversation = async ({
         logLiveEvent(serverEvent);
 
         if (serverEvent.type === "session.started") {
-          if (outboundOpening.request(leadFlowContext?.conversationMode)) {
-            setStatus("AI speaking");
-          } else {
-            setStatus("Listening");
-          }
+          transcriptCollector.markStarted();
+          transcriptCheckpoints.start();
+          firstSpeechGate.start();
+          setStatus("Listening");
         } else if (serverEvent.type === "session.input_transcript.delta") {
+          transcriptCollector.addCustomerFragment({
+            delta: serverEvent.delta,
+            startMs: serverEvent.start_ms,
+            endMs: serverEvent.end_ms,
+          });
+          transcriptCheckpoints.noteChanged();
+          renderTranscript();
+          firstSpeechGate.observeTranscript(serverEvent.delta);
           setStatus("Listening");
         } else if (serverEvent.type === "session.output_transcript.delta") {
+          transcriptCollector.addEmmaFragment({
+            delta: serverEvent.delta,
+            startMs: serverEvent.start_ms,
+            endMs: serverEvent.end_ms,
+          });
+          transcriptCheckpoints.noteChanged();
+          renderTranscript();
           setStatus("AI speaking");
           clearTimeout(speakingTimer);
           speakingTimer = setTimeout(() => setStatus("Listening"), 1_200);
         } else if (serverEvent.type === "session.closed") {
+          void transcriptCheckpoints.finalize();
           setStatus("Conversation ended");
         } else if (serverEvent.type === "response.event") {
           handleResponseEvent(serverEvent);
