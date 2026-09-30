@@ -1,6 +1,11 @@
 import "dotenv/config";
 import { z } from "zod";
 
+import {
+  BACKEND_MODEL_BASELINE,
+  backendModelEnvironmentSchema,
+} from "../agent/backend-models.js";
+
 const optionalEnvironmentValue = z.preprocess(
   (value) =>
     typeof value === "string" && value.trim() === "" ? undefined : value,
@@ -34,11 +39,9 @@ const environmentSchema = z.object({
     .default("gpt-realtime-2.1-mini"),
   OPENAI_REALTIME_VOICE: z.enum(realtimeVoices).default("marin"),
   OPENAI_LIVE_MODEL: z.literal("gpt-live-1").default("gpt-live-1"),
-  OPENAI_AGENT_MODEL: z
-    .string()
-    .trim()
-    .min(1, "OPENAI_AGENT_MODEL is required")
-    .default("gpt-5.4-mini"),
+  OPENAI_AGENT_MODEL: backendModelEnvironmentSchema.default(
+    BACKEND_MODEL_BASELINE,
+  ),
   GOOGLE_CALENDAR_ID: optionalEnvironmentValue,
   GOOGLE_CLIENT_ID: optionalEnvironmentValue,
   GOOGLE_CLIENT_SECRET: optionalEnvironmentValue,

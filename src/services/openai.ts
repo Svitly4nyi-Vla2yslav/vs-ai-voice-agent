@@ -2,7 +2,6 @@ import OpenAI from "openai";
 
 import {
   VS_WEB_STUDIO_AGENT_INSTRUCTIONS,
-  VS_WEB_STUDIO_BACKEND_INSTRUCTIONS,
   VS_WEB_STUDIO_LIVE_INSTRUCTIONS,
 } from "../agent/instructions.js";
 import type {
@@ -25,5 +24,4 @@ export const liveAgentConfiguration: LiveAgentConfiguration = {
   model: env.OPENAI_LIVE_MODEL,
   instructions: VS_WEB_STUDIO_LIVE_INSTRUCTIONS,
   backendModel: env.OPENAI_AGENT_MODEL,
-  backendInstructions: VS_WEB_STUDIO_BACKEND_INSTRUCTIONS,
 };

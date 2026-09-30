@@ -7,6 +7,7 @@ export {
   getCalendarAvailabilityToolDefinition,
   prepareNextStepToolDefinition,
   rescheduleMeetingToolDefinition,
+  serializedAgentTools,
   updateMeetingDetailsToolDefinition,
   syncLeadFlowInteractionToolDefinition,
 } from "./registry.js";

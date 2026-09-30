@@ -39,6 +39,7 @@ export const startLiveConversation = async ({
   setStatus,
   setToolActivity,
   setLeadFlowStatus,
+  setBackendCacheStatus,
   leadFlowContext,
   signal,
 }) => {
@@ -49,6 +50,47 @@ export const startLiveConversation = async ({
   let closed = false;
   const handledToolCalls = new Set();
   let toolQueue = Promise.resolve();
+
+  const promptCacheUsageFromResponse = (response) => {
+    const usage = response?.usage;
+    if (!Number.isInteger(usage?.input_tokens) || usage.input_tokens < 0) {
+      return undefined;
+    }
+
+    const cacheDetails = usage.input_tokens_details;
+    return {
+      inputTokens: usage.input_tokens,
+      ...(Number.isInteger(cacheDetails?.cached_tokens) &&
+      cacheDetails.cached_tokens >= 0
+        ? { cachedTokens: cacheDetails.cached_tokens }
+        : {}),
+      ...(Number.isInteger(cacheDetails?.cache_write_tokens) &&
+      cacheDetails.cache_write_tokens >= 0
+        ? { cacheWriteTokens: cacheDetails.cache_write_tokens }
+        : {}),
+    };
+  };
+
+  const reportPromptCacheUsage = async (usage) => {
+    try {
+      const response = await fetch("/api/live/cache-usage", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(usage),
+        signal,
+      });
+      if (!response.ok) return;
+      const telemetry = await response.json();
+      if (Number.isFinite(telemetry?.hitRate)) {
+        setBackendCacheStatus(`${Math.round(telemetry.hitRate * 100)}% reused`);
+      }
+    } catch {
+      // Cache telemetry is diagnostic-only and must never interrupt the call.
+    }
+  };
 
   const sendLiveEvent = (clientEvent) => {
     if (closed || channel?.readyState !== "open") {
@@ -230,6 +272,9 @@ export const startLiveConversation = async ({
         .catch(() => setToolActivity("Tool error"));
     } else if (nestedEvent?.type === "response.failed") {
       setToolActivity("Tool error");
+    } else if (nestedEvent?.type === "response.completed") {
+      const usage = promptCacheUsageFromResponse(nestedEvent.response);
+      if (usage) void reportPromptCacheUsage(usage);
     }
   };
 

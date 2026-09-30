@@ -13,6 +13,7 @@ const outputVolumeValue = document.querySelector("#output-volume-value");
 const toolActivityElement = document.querySelector("#tool-activity");
 const leadFlowLeadIdInput = document.querySelector("#leadflow-lead-id");
 const leadFlowStatusElement = document.querySelector("#leadflow-status");
+const backendCacheStatusElement = document.querySelector("#backend-cache-status");
 const leadFlowContextElement = document.querySelector("#leadflow-context");
 const leadFlowModeElement = document.querySelector("#leadflow-mode");
 const leadFlowCompanyElement = document.querySelector("#leadflow-company");
@@ -63,6 +64,10 @@ const setToolActivity = (message) => {
 
 const setLeadFlowStatus = (message) => {
   leadFlowStatusElement.textContent = message;
+};
+
+const setBackendCacheStatus = (message) => {
+  backendCacheStatusElement.textContent = message;
 };
 
 const leadFlowFailureMessage = (reason) => {
@@ -347,6 +352,7 @@ const startConversation = async () => {
   try {
     setStatus("Connecting");
     if (selectedMode === "live") {
+      setBackendCacheStatus("No usage data yet");
       const abortController = new AbortController();
       connectionAbortController = abortController;
       const liveConversation = await startLiveConversation({
@@ -355,6 +361,7 @@ const startConversation = async () => {
         setStatus,
         setToolActivity,
         setLeadFlowStatus,
+        setBackendCacheStatus,
         leadFlowContext,
         signal: abortController.signal,
       });

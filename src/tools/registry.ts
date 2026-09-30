@@ -344,16 +344,59 @@ export const syncLeadFlowInteractionToolDefinition = {
   },
 } satisfies FunctionTool;
 
-export const agentTools = [
-  prepareNextStepToolDefinition,
-  getCalendarAvailabilityToolDefinition,
-  bookMeetingToolDefinition,
-  findEmmaMeetingsToolDefinition,
-  rescheduleMeetingToolDefinition,
-  cancelMeetingToolDefinition,
-  updateMeetingDetailsToolDefinition,
-  syncLeadFlowInteractionToolDefinition,
-] satisfies FunctionTool[];
+const canonicalizeJsonValue = <T>(value: T): T => {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeJsonValue(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0,
+        )
+        .map(([key, item]) => [key, canonicalizeJsonValue(item)]),
+    ) as T;
+  }
+  return value;
+};
+
+const freezeJsonValue = (value: unknown): void => {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+  for (const item of Object.values(value)) freezeJsonValue(item);
+  Object.freeze(value);
+};
+
+const agentToolOrder = [
+  "prepareNextStep",
+  "getCalendarAvailability",
+  "bookMeeting",
+  "findEmmaMeetings",
+  "rescheduleMeeting",
+  "cancelMeeting",
+  "updateMeetingDetails",
+  "syncLeadFlowInteraction",
+] as const;
+
+const agentToolDefinitions = {
+  prepareNextStep: prepareNextStepToolDefinition,
+  getCalendarAvailability: getCalendarAvailabilityToolDefinition,
+  bookMeeting: bookMeetingToolDefinition,
+  findEmmaMeetings: findEmmaMeetingsToolDefinition,
+  rescheduleMeeting: rescheduleMeetingToolDefinition,
+  cancelMeeting: cancelMeetingToolDefinition,
+  updateMeetingDetails: updateMeetingDetailsToolDefinition,
+  syncLeadFlowInteraction: syncLeadFlowInteractionToolDefinition,
+} satisfies Record<(typeof agentToolOrder)[number], FunctionTool>;
+
+// Build one canonical copy at module initialization. Object keys (including JSON
+// Schema properties) are sorted, tool order is explicit, and runtime freezing
+// prevents request- or lead-specific mutation.
+export const agentTools: FunctionTool[] = agentToolOrder.map((name) =>
+  canonicalizeJsonValue(agentToolDefinitions[name]),
+);
+freezeJsonValue(agentTools);
+
+export const serializedAgentTools = JSON.stringify(agentTools);
 
 const registeredToolNames = new Set(agentTools.map((tool) => tool.name));
 

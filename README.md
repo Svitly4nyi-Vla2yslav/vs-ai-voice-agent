@@ -2,7 +2,9 @@
 
 ## Current status
 
-**Phase 5D-B4 – explicit outbound sales conversation mode.** A verified task-aware LeadFlow session now selects `OUTBOUND_SALES` server-side. Emma initiates the first turn exactly once in both Live and Realtime, transparently identifies herself as the AI assistant of VS Web Studio, uses the verified Call Brief, and leads with one relevant discovery question. `gpt-live-1` remains the conversational voice model and delegates backend reasoning/tool selection to `gpt-5.4-mini`. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5A/5C verified writeback and handoff behavior are preserved.
+**Prompt Cache Optimization — Phase 1.** `gpt-live-1` remains the conversational voice model. Its managed Responses backend now receives a deterministic global prefix and canonical tool definitions before verified session/customer context. `OPENAI_AGENT_MODEL` remains configurable and defaults to `gpt-5.4-mini`; `gpt-6-luna` is an opt-in A/B experiment, not an automatic production switch. See [the Phase 1 architecture and A/B checklist](docs/prompt-cache-phase-1.md).
+
+The verified task-aware LeadFlow session still selects `OUTBOUND_SALES` server-side. Emma initiates the first turn exactly once in both Live and Realtime, transparently identifies herself as the AI assistant of VS Web Studio, uses the verified Call Brief, and leads with one relevant discovery question. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5A/5C verified writeback and handoff behavior are preserved.
 
 The registered backend tools are:
 
@@ -128,6 +130,8 @@ CALENDAR_DEFAULT_DURATION_MINUTES=30
 CALENDAR_BUFFER_MINUTES=30
 PORT=3002
 ```
+
+For the manual backend A/B experiment, change only `OPENAI_AGENT_MODEL` to `gpt-6-luna`, restart the application, and repeat the same scenarios from the [Prompt Cache Phase 1 checklist](docs/prompt-cache-phase-1.md). Do not switch production automatically.
 
 The application can still start without Google or LeadFlow values. Calendar tools then return a sanitized configuration error; LeadFlow shows `Not configured` and refuses writeback without claiming success. All four Google variables are required for Calendar, and both LeadFlow variables are required for CRM writeback.
 

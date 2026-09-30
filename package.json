@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "check:openai": "tsx src/scripts/check-openai.ts",
+    "check:prompt-cache": "tsx src/scripts/check-prompt-cache.ts",
     "check:tools": "tsx src/scripts/check-tools.ts",
     "check:calendar": "tsx src/scripts/check-calendar.ts",
     "check:google-calendar": "tsx src/scripts/check-google-calendar.ts",

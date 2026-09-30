@@ -66,12 +66,16 @@ const reportFailure = (error: unknown): void => {
 
 const checkOpenAI = async (): Promise<void> => {
   try {
-    const { openAIClient } = await import("../services/openai.js");
+    const [{ openAIClient }, { env }] = await Promise.all([
+      import("../services/openai.js"),
+      import("../config/env.js"),
+    ]);
 
     await openAIClient.models.list();
+    await openAIClient.models.retrieve(env.OPENAI_AGENT_MODEL);
 
     console.log(
-      "OpenAI API connectivity verified. Environment loaded, SDK initialized, and authentication succeeded.",
+      `OpenAI API connectivity and configured backend model access verified (${env.OPENAI_AGENT_MODEL}).`,
     );
   } catch (error: unknown) {
     reportFailure(error);

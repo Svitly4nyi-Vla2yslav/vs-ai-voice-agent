@@ -2,6 +2,7 @@ import { Router } from "express";
 import { APIError } from "openai";
 import { z } from "zod";
 
+import { composeBackendInstructions } from "../agent/instructions.js";
 import { voiceLabVoices } from "../agent/types.js";
 import { env } from "../config/env.js";
 import { isSameOriginRequest } from "../http/same-origin.js";
@@ -10,6 +11,10 @@ import {
   leadFlowConversationContext,
   readLeadFlowSessionToken,
 } from "../services/leadflow-session.js";
+import {
+  logPromptCacheTelemetry,
+  promptCacheTelemetry,
+} from "../services/prompt-cache.js";
 import { agentTools } from "../tools/index.js";
 
 export const liveRouter = Router();
@@ -21,6 +26,34 @@ const liveSessionRequestSchema = z
     leadFlowSession: z.string().trim().min(1).max(65_536).optional(),
   })
   .strict();
+
+const promptCacheUsageSchema = z
+  .object({
+    inputTokens: z.number().int().nonnegative(),
+    cachedTokens: z.number().int().nonnegative().optional(),
+    cacheWriteTokens: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+liveRouter.post("/api/live/cache-usage", (request, response) => {
+  if (!isSameOriginRequest(request)) {
+    response.status(403).json({ error: "Unexpected request origin" });
+    return;
+  }
+
+  const parsedUsage = promptCacheUsageSchema.safeParse(request.body);
+  if (!parsedUsage.success) {
+    response.status(400).json({ error: "Invalid cache usage" });
+    return;
+  }
+
+  logPromptCacheTelemetry(parsedUsage.data);
+  const telemetry = promptCacheTelemetry(parsedUsage.data);
+  response.set("Cache-Control", "no-store");
+  response.status(202).json({
+    hitRate: telemetry.hitRate ?? null,
+  });
+});
 
 liveRouter.post("/api/live/session", async (request, response) => {
   if (!isSameOriginRequest(request)) {
@@ -47,19 +80,20 @@ liveRouter.post("/api/live/session", async (request, response) => {
       response.status(400).json({ error: "Invalid LeadFlow session" });
       return;
     }
-    const contextInstructions = leadFlowContext
-      ? `\n\n${leadFlowConversationContext(leadFlowContext)}`
-      : "";
+    const sessionContext = leadFlowContext
+      ? leadFlowConversationContext(leadFlowContext)
+      : undefined;
+    const liveContextInstructions = sessionContext ? `\n\n${sessionContext}` : "";
     const liveSession = await openAIClient.live.create({
       session: {
         model: liveAgentConfiguration.model,
-        instructions: `${liveAgentConfiguration.instructions}${contextInstructions}`,
+        instructions: `${liveAgentConfiguration.instructions}${liveContextInstructions}`,
         store: false,
         delegation: {
           type: "responses",
           responses: {
             model: liveAgentConfiguration.backendModel,
-            instructions: `${liveAgentConfiguration.backendInstructions}${contextInstructions}`,
+            instructions: composeBackendInstructions(sessionContext),
             tools: agentTools,
             tool_choice: "auto",
             parallel_tool_calls: false,
