@@ -7,6 +7,13 @@ export interface BookingCalendarConfigurationResult {
   status: BookingCalendarConfigurationStatus;
 }
 
+/**
+ * Перевіряє наявність календаря та за потреби забороняє використання primary.
+ *
+ * @param calendarId — ідентифікатор календаря з конфігурації середовища.
+ * @param options — політика, що визначає обов'язковість окремого booking-календаря.
+ * @returns Контрольований статус конфігурації без розкриття самого calendarId.
+ */
 export const validateBookingCalendarConfiguration = (
   calendarId: string | undefined,
   options: { requireDedicated: boolean } = { requireDedicated: true },
