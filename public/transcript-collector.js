@@ -69,13 +69,52 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
       return left.sequence - right.sequence;
     });
 
-  const snapshotSegments = () =>
-    orderedInternalSegments().map(({ speaker, delta, startMs, endMs }) => ({
-      speaker,
-      delta,
-      ...(startMs !== undefined ? { startMs } : {}),
-      ...(endMs !== undefined ? { endMs } : {}),
-    }));
+  const joinText = (left, right) => {
+    if (!left) return right.trimStart();
+    if (!right) return left;
+    if (/\s$/u.test(left) || /^\s/u.test(right)) return `${left}${right}`;
+    if (/^[,.;:!?%)\]}]/u.test(right) || /[(\[{â€žâ€œ"']$/u.test(left)) {
+      return `${left}${right}`;
+    }
+    return `${left} ${right}`;
+  };
+
+  const startsNewTurn = (previous, current) => {
+    if (!previous || previous.speaker !== current.speaker) return true;
+    if (
+      previous.source === "realtime" &&
+      current.source === "realtime" &&
+      previous.itemId &&
+      current.itemId &&
+      previous.itemId !== current.itemId
+    ) return true;
+    if (previous.endMs === undefined || current.startMs === undefined) return false;
+    const pause = current.startMs - previous.endMs;
+    return pause >= 1_200 || (pause >= 500 && /[.!?â€¦][â€"']?\s*$/u.test(previous.delta));
+  };
+
+  const snapshotSegments = () => {
+    const turns = [];
+    let previous;
+    for (const segment of orderedInternalSegments()) {
+      const currentTurn = turns.at(-1);
+      if (startsNewTurn(previous, segment) || !currentTurn) {
+        turns.push({
+          speaker: segment.speaker,
+          delta: segment.delta.trimStart(),
+          ...(segment.startMs !== undefined ? { startMs: segment.startMs } : {}),
+          ...(segment.endMs !== undefined ? { endMs: segment.endMs } : {}),
+        });
+      } else {
+        currentTurn.delta = joinText(currentTurn.delta, segment.delta);
+        if (segment.endMs !== undefined) currentTurn.endMs = segment.endMs;
+      }
+      previous = segment;
+    }
+    return turns
+      .map((turn) => ({ ...turn, delta: turn.delta.trim() }))
+      .filter((turn) => turn.delta.length > 0);
+  };
 
   return {
     markStarted(value = now().toISOString()) {

@@ -11,6 +11,7 @@
     "check:prompt-cache": "tsx src/scripts/check-prompt-cache.ts",
     "check:tools": "tsx src/scripts/check-tools.ts",
     "check:calendar": "tsx src/scripts/check-calendar.ts",
+    "check:booking-policy": "tsx src/scripts/check-booking-policy.ts",
     "check:google-calendar": "tsx src/scripts/check-google-calendar.ts",
     "check:leadflow": "tsx src/scripts/check-leadflow.ts",
     "check:leadflow-handoff": "tsx src/scripts/check-leadflow-handoff.ts",

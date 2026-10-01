@@ -3,8 +3,12 @@ export const createTranscriptCheckpointManager = ({
   leadFlowSession,
   onStatus = () => {},
   fetchImplementation = fetch,
-  intervalMs = 10_000,
-  textThreshold = 2_000,
+  intervalMs = 20_000,
+  textThreshold = 4_000,
+  finalAttempts = 3,
+  retryDelayMs = 450,
+  delayImplementation = (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
+  onDiagnostic = (diagnostic) => console.warn("[Transcript]", diagnostic),
   setIntervalImplementation = setInterval,
   clearIntervalImplementation = clearInterval,
 }) => {
@@ -15,11 +19,11 @@ export const createTranscriptCheckpointManager = ({
   let queue = Promise.resolve(false);
   let finalPromise;
 
-  const send = async (state, keepalive = false) => {
+  const sendOnce = async (state, keepalive = false) => {
     const snapshot = collector.snapshot();
-    if (snapshot.segments.length === 0) return false;
+    if (snapshot.segments.length === 0) return { ok: true, skipped: true };
     if (state === "PARTIAL" && snapshot.revision <= lastPersistedRevision) {
-      return false;
+      return { ok: true, skipped: true };
     }
     let response;
     try {
@@ -37,8 +41,7 @@ export const createTranscriptCheckpointManager = ({
         keepalive,
       });
     } catch {
-      onStatus("Transcript checkpoint failed: leadflow_unavailable");
-      return false;
+      return { ok: false, reason: "leadflow_unavailable" };
     }
     let result;
     try {
@@ -61,12 +64,11 @@ export const createTranscriptCheckpointManager = ({
       const reason = safeReasons.has(result?.status)
         ? result.status
         : "provider_error";
-      onStatus(`Transcript checkpoint failed: ${reason}`);
-      return false;
+      return { ok: false, reason };
     }
     lastPersistedRevision = snapshot.revision;
     lastPersistedTextSize = collector.getTotalTextSize();
-    onStatus(state === "FINAL" ? "Transcript saved" : "Transcript checkpointed");
+    if (state === "FINAL") onStatus("Transcript saved");
     const calendarMirrorFailures = new Set([
       "not_managed_by_emma",
       "call_task_mismatch",
@@ -75,7 +77,24 @@ export const createTranscriptCheckpointManager = ({
     if (state === "FINAL" && calendarMirrorFailures.has(result?.calendarMirrorStatus)) {
       onStatus(`Transcript saved; Calendar mirror failed: ${result.calendarMirrorStatus}`);
     }
-    return true;
+    return { ok: true };
+  };
+
+  const send = async (state, keepalive = false) => {
+    const attempts = state === "FINAL" ? Math.max(1, finalAttempts) : 1;
+    let result = { ok: false, reason: "provider_error" };
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      result = await sendOnce(state, keepalive);
+      if (result.ok) return true;
+      onDiagnostic({ state, attempt, attempts, reason: result.reason });
+      if (attempt < attempts) {
+        await delayImplementation(retryDelayMs * 2 ** (attempt - 1));
+      }
+    }
+    if (state === "FINAL") {
+      onStatus(`Transcript could not be saved: ${result.reason}`);
+    }
+    return false;
   };
 
   const checkpoint = (state = "PARTIAL", keepalive = false) => {

@@ -6,6 +6,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import { z } from "zod";
+import { DateTime } from "luxon";
 
 import {
   OUTBOUND_SALES_CONVERSATION_MODE,
@@ -214,6 +215,7 @@ export const conversationModeForLeadFlowContext = (
 
 export const leadFlowConversationContext = (
   context: LeadFlowSessionContext,
+  now = DateTime.now().setZone("Europe/Berlin"),
 ): string => {
   const conversationMode = conversationModeForLeadFlowContext(context);
   const businessData = {
@@ -233,6 +235,7 @@ export const leadFlowConversationContext = (
 
   return [
     "VERIFIZIERTER OPERATOR-/GESCHAEFTSKONTEXT",
+    `Aktuelles lokales Datum: ${now.toFormat("yyyy-MM-dd")} (Europe/Berlin).`,
     ...(conversationMode === OUTBOUND_SALES_CONVERSATION_MODE
       ? [VS_WEB_STUDIO_OUTBOUND_SALES_INSTRUCTIONS]
       : []),

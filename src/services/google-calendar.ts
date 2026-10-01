@@ -46,6 +46,12 @@ export interface StoredCalendarEvent {
   privateProperties: Record<string, string>;
 }
 
+/** Only explicitly classified client appointments can reserve booking capacity. */
+export const isBlockingClientEvent = (event: StoredCalendarEvent): boolean =>
+  event.privateProperties.vsAiSource === "emma" ||
+  event.privateProperties.vsAiBookingCategory === "client_meeting" ||
+  event.privateProperties.vsAiBlocksBooking === "true";
+
 export interface CalendarEventToInsert {
   id: string;
   summary: string;
@@ -186,7 +192,7 @@ export type BookingResult =
       externalActionPerformed: false;
     }
   | {
-      status: "slot_no_longer_available";
+      status: "slot_no_longer_available" | "outside_working_hours";
       alternatives: CalendarSlot[];
       externalActionPerformed: false;
     }
@@ -246,7 +252,7 @@ export type RescheduleMeetingResult =
       externalActionPerformed: false;
     }
   | {
-      status: "slot_no_longer_available";
+      status: "slot_no_longer_available" | "outside_working_hours";
       alternatives: CalendarSlot[];
       externalActionPerformed: false;
     }
@@ -459,27 +465,30 @@ export const createGoogleCalendarGateway = (
 
     async getBusyPeriods(timeMin, timeMax) {
       try {
-        const response = await auth.request<GoogleFreeBusyResponse>({
-          url: `${calendarBaseUrl}/freeBusy`,
-          method: "POST",
-          data: {
-            timeMin,
-            timeMax,
-            timeZone: settings.timezone,
-            items: [{ id: settings.calendarId }],
-          },
-        });
-        const calendars = response.data.calendars ?? {};
-        const calendarResult =
-          calendars[settings.calendarId] ?? Object.values(calendars)[0];
-        if (calendarResult?.errors?.length) {
-          throw new CalendarProviderError("unavailable");
-        }
-        return (calendarResult?.busy ?? []).flatMap((period) =>
-          period.start && period.end
-            ? [{ start: period.start, end: period.end }]
-            : [],
-        );
+        const events: GoogleEventResponse[] = [];
+        let pageToken: string | undefined;
+        do {
+          const response = await auth.request<GoogleEventsListResponse>({
+            url: `${calendarBaseUrl}/calendars/${encodedCalendarId}/events`,
+            method: "GET",
+            params: {
+              timeMin,
+              timeMax,
+              singleEvents: true,
+              showDeleted: false,
+              maxResults: 250,
+              ...(pageToken ? { pageToken } : {}),
+            },
+          });
+          events.push(...(response.data.items ?? []));
+          pageToken = response.data.nextPageToken ?? undefined;
+        } while (pageToken);
+        return events
+          .map(asStoredEvent)
+          .filter(isBlockingClientEvent)
+          .flatMap((event) => event.start && event.end
+            ? [{ start: event.start, end: event.end }]
+            : []);
       } catch (error) {
         if (error instanceof CalendarProviderError) throw error;
         throw new CalendarProviderError(providerReason(error));
@@ -506,11 +515,12 @@ export const createGoogleCalendarGateway = (
           events.push(...(response.data.items ?? []));
           pageToken = response.data.nextPageToken ?? undefined;
         } while (pageToken);
-        return events.flatMap((event) =>
-          event.id !== excludedEventId && event.start?.dateTime && event.end?.dateTime
-            ? [{ start: event.start.dateTime, end: event.end.dateTime }]
-            : [],
-        );
+        return events
+          .map(asStoredEvent)
+          .filter((event) => event.id !== excludedEventId && isBlockingClientEvent(event))
+          .flatMap((event) => event.start && event.end
+            ? [{ start: event.start, end: event.end }]
+            : []);
       } catch (error) {
         throw new CalendarProviderError(providerReason(error));
       }
@@ -816,14 +826,22 @@ const privateContextReference = (kind: string, value: string): string =>
 
 const transcriptMarker = "--- Automatic call transcript ---";
 
-const transcriptDescription = (segments: CalendarTranscriptSegment[]): string => {
+const joinTranscriptText = (left: string, right: string): string => {
+  if (!left) return right.trimStart();
+  if (!right) return left;
+  if (/\s$/u.test(left) || /^\s/u.test(right)) return `${left}${right}`;
+  if (/^[,.;:!?%)\]}]/u.test(right) || /[(\[{â€žâ€œ"']$/u.test(left)) return `${left}${right}`;
+  return `${left} ${right}`;
+};
+
+export const formatCalendarTranscript = (segments: CalendarTranscriptSegment[]): string => {
   const turns: Array<{ speaker: "CUSTOMER" | "EMMA"; text: string }> = [];
   for (const segment of segments) {
     const previous = turns.at(-1);
     if (previous?.speaker === segment.speaker) {
-      previous.text += segment.delta;
+      previous.text = joinTranscriptText(previous.text, segment.delta).trim();
     } else {
-      turns.push({ speaker: segment.speaker, text: segment.delta });
+      turns.push({ speaker: segment.speaker, text: segment.delta.trim() });
     }
   }
   return [
@@ -1038,11 +1056,19 @@ export class GoogleCalendarService {
         ? { start: toIso(exactStart), end: toIso(exactEnd) }
         : null;
 
+    const nearestValidAlternatives = async (anchor: DateTime): Promise<CalendarSlot[]> => {
+      const result = await this.getNextAvailableMeetingSlots(
+        { durationMinutes: input.durationMinutes, timezone: input.timezone },
+        anchor,
+      );
+      return result.status === "available" ? result.slots : [];
+    };
+
     if (workStart.weekday > 5) {
       return {
         status: "outside_working_hours",
         requestedSlot,
-        alternatives: [],
+        alternatives: await nearestValidAlternatives(exactStart ?? workStart),
         externalActionPerformed: false,
       };
     }
@@ -1062,7 +1088,7 @@ export class GoogleCalendarService {
       return {
         status: "outside_working_hours",
         requestedSlot,
-        alternatives: [],
+        alternatives: await nearestValidAlternatives(exactStart ?? rangeStart),
         externalActionPerformed: false,
       };
     }
@@ -1109,7 +1135,7 @@ export class GoogleCalendarService {
 
   async getNextAvailableMeetingSlots(
     input: NextAvailableMeetingSlotsInput,
-    now = DateTime.now().setZone(CALENDAR_TIMEZONE),
+    now: DateTime = DateTime.now().setZone(CALENDAR_TIMEZONE),
   ): Promise<NextAvailableMeetingSlotsResult> {
     const localNow = now.setZone(input.timezone);
     const businessDays: DateTime[] = [];
@@ -1296,9 +1322,16 @@ export class GoogleCalendarService {
         start.toMillis() < workStart.toMillis() ||
         end.toMillis() > workEnd.toMillis()
       ) {
+        const nearest = await this.getNextAvailableMeetingSlots(
+          {
+            durationMinutes: Math.round(end.diff(start, "minutes").minutes),
+            timezone: input.timezone,
+          },
+          start,
+        );
         return {
-          status: "slot_no_longer_available",
-          alternatives: [],
+          status: "outside_working_hours",
+          alternatives: nearest.status === "available" ? nearest.slots : [],
           externalActionPerformed: false,
         };
       }
@@ -1580,7 +1613,9 @@ export class GoogleCalendarService {
           availability.status === "outside_working_hours"
         ) {
           return {
-            status: "slot_no_longer_available",
+            status: availability.status === "outside_working_hours"
+              ? "outside_working_hours"
+              : "slot_no_longer_available",
             alternatives: availability.alternatives,
             externalActionPerformed: false,
           };
@@ -1614,6 +1649,8 @@ export class GoogleCalendarService {
         privateProperties: {
           vsAiRequestHash: requestHash,
           vsAiSource: "emma",
+          vsAiBookingCategory: "client_meeting",
+          vsAiBlocksBooking: "true",
           vsAiMeetingMode: input.meetingMode,
           ...(options.callTaskId
             ? {
@@ -1694,7 +1731,7 @@ export class GoogleCalendarService {
       "conversation",
       context.conversationId,
     );
-    const transcript = transcriptDescription(segments);
+    const transcript = formatCalendarTranscript(segments);
     const transcriptHash = createHash("sha256").update(transcript).digest("hex");
 
     try {

@@ -83,21 +83,15 @@ const setTranscriptStatus = (message) => {
 
 const renderTranscript = () => {
   const segments = activeTranscriptCollector?.snapshot().segments ?? [];
-  const turns = [];
-  for (const segment of segments) {
-    const previous = turns.at(-1);
-    if (previous?.speaker === segment.speaker) {
-      previous.text += segment.delta;
-    } else {
-      turns.push({ speaker: segment.speaker, text: segment.delta });
-    }
-  }
   transcriptElement.replaceChildren();
-  for (const turn of turns) {
-    const row = document.createElement("p");
+  for (const turn of segments) {
+    const row = document.createElement("article");
+    row.className = `transcript-turn ${turn.speaker === "CUSTOMER" ? "customer" : "emma"}`;
     const label = document.createElement("strong");
-    label.textContent = turn.speaker === "CUSTOMER" ? "Customer: " : "Emma: ";
-    row.append(label, document.createTextNode(turn.text));
+    label.textContent = turn.speaker === "CUSTOMER" ? "Customer" : "Emma";
+    const text = document.createElement("p");
+    text.textContent = turn.delta;
+    row.append(label, text);
     transcriptElement.append(row);
   }
   transcriptElement.scrollTop = transcriptElement.scrollHeight;

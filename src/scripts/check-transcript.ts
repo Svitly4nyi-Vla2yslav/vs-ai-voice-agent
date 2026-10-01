@@ -17,10 +17,15 @@ collector.markStarted();
 collector.addCustomerFragment({ delta: "Guten ", startMs: 100, endMs: 200 });
 collector.addCustomerFragment({ delta: "Tag", startMs: 200, endMs: 300 });
 assert.deepEqual(collector.snapshot().segments, [
-  { speaker: "CUSTOMER", delta: "Guten ", startMs: 100, endMs: 200 },
-  { speaker: "CUSTOMER", delta: "Tag", startMs: 200, endMs: 300 },
+  { speaker: "CUSTOMER", delta: "Guten Tag", startMs: 100, endMs: 300 },
 ]);
 assert.equal(collector.getTotalTextSize(), "Guten Tag".length);
+
+const pausedCollector = createTranscriptCollector();
+pausedCollector.markStarted("2026-09-30T10:00:00.000Z");
+pausedCollector.addCustomerFragment({ delta: "Erster Satz.", startMs: 0, endMs: 900 });
+pausedCollector.addCustomerFragment({ delta: "Neuer Gedanke.", startMs: 2_200, endMs: 3_000 });
+assert.equal(pausedCollector.snapshot().segments.length, 2, "a meaningful pause creates a new readable turn");
 
 const realtime = createTranscriptCollector();
 realtime.markStarted("2026-09-30T10:00:00.000Z");
@@ -50,7 +55,7 @@ const checkpoints = createTranscriptCheckpointManager({
     );
   },
   setIntervalImplementation: (callback, delay) => {
-    assert.equal(delay, 10_000);
+    assert.equal(delay, 20_000);
     intervalCallback = callback;
     return 10;
   },
@@ -60,7 +65,7 @@ checkpoints.start();
 intervalCallback();
 await checkpoints.checkpoint();
 assert.equal(checkpointPayloads[0].state, "PARTIAL");
-assert.equal(statuses[0], "Transcript checkpointed");
+assert.equal(statuses.length, 0, "PARTIAL checkpoints stay quiet in the customer UI");
 await checkpoints.finalize({ keepalive: true });
 assert.equal(checkpointPayloads.at(-1).state, "FINAL");
 assert.ok(checkpointPayloads.at(-1).endedAt);
@@ -91,8 +96,9 @@ const failingCheckpoints = createTranscriptCheckpointManager({
 });
 await failingCheckpoints.checkpoint();
 assert.equal(
-  diagnosticStatuses.at(-1),
-  "Transcript checkpoint failed: call_task_mismatch",
+  diagnosticStatuses.length,
+  0,
+  "PARTIAL failures are diagnostic-only and do not present a hard customer-facing error",
 );
 
 const unavailableStatuses = [];
@@ -106,9 +112,36 @@ const unavailableCheckpoints = createTranscriptCheckpointManager({
 });
 await unavailableCheckpoints.checkpoint();
 assert.equal(
-  unavailableStatuses.at(-1),
-  "Transcript checkpoint failed: leadflow_unavailable",
+  unavailableStatuses.length,
+  0,
+  "temporary PARTIAL transport failures stay quiet",
 );
+
+const retryCollector = createTranscriptCollector();
+retryCollector.markStarted("2026-09-30T10:00:00.000Z");
+retryCollector.addCustomerFragment({ delta: "Bitte speichern." });
+let finalAttempts = 0;
+const retryDelays = [];
+const retryStatuses = [];
+const retryingFinal = createTranscriptCheckpointManager({
+  collector: retryCollector,
+  leadFlowSession: "encrypted-session-token",
+  onStatus: (status) => retryStatuses.push(status),
+  onDiagnostic: () => {},
+  delayImplementation: async (delay) => { retryDelays.push(delay); },
+  fetchImplementation: async () => {
+    finalAttempts += 1;
+    if (finalAttempts < 3) throw new Error("temporary transport failure");
+    return new Response(JSON.stringify({ status: "persisted" }), {
+      status: 202,
+      headers: { "Content-Type": "application/json" },
+    });
+  },
+});
+assert.equal(await retryingFinal.finalize(), true);
+assert.equal(finalAttempts, 3);
+assert.deepEqual(retryDelays, [450, 900]);
+assert.equal(retryStatuses.at(-1), "Transcript saved");
 
 const fixedEventId = "00000000-0000-4000-8000-000000000999";
 const client = new LeadFlowClient({
@@ -241,13 +274,14 @@ const responseResult = await client.sendTranscript(
 );
 assert.equal(responseResult.ok, true, "LeadFlow 2xx response must be accepted");
 
-const [routeSource, leadFlowSource, instructionSource, serviceCatalogSource, outboundSource] =
+const [routeSource, leadFlowSource, instructionSource, serviceCatalogSource, outboundSource, stylesSource] =
   await Promise.all([
     readFile(new URL("../routes/leadflow.ts", import.meta.url), "utf8"),
     readFile(new URL("../services/leadflow.ts", import.meta.url), "utf8"),
     readFile(new URL("../agent/instructions.ts", import.meta.url), "utf8"),
     readFile(new URL("../agent/service-catalog.ts", import.meta.url), "utf8"),
     readFile(new URL("../../public/outbound-opening.js", import.meta.url), "utf8"),
+    readFile(new URL("../../public/styles.css", import.meta.url), "utf8"),
   ]);
 assert.match(routeSource, /leadId: session\.leadId/);
 assert.match(routeSource, /callTaskId: session\.callTaskId/);
@@ -274,6 +308,9 @@ assert.match(serviceCatalogSource, /Manuelles Lead-Chaos:/);
 assert.match(serviceCatalogSource, /ein bis drei kurzen gesprochenen Sätzen/);
 assert.match(outboundSource, /FIRST_SPEECH_TIMEOUT_MS = 30_000/);
 assert.match(outboundSource, /observeTranscript/);
+assert.match(stylesSource, /--obsidian:#050505/);
+assert.match(stylesSource, /--gold:#e5c477/);
+assert.match(stylesSource, /prefers-reduced-motion/);
 
 console.log(
   "Transcript checks passed (collector deltas, canonical sequence/text wire format, limits, spacing, PARTIAL/FINAL, safe diagnostics, LeadFlow-first Calendar order, service policy, no spoken transcript disclosure, and first-speech gate preservation).",
