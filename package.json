@@ -16,7 +16,7 @@
     "check:leadflow-handoff": "tsx src/scripts/check-leadflow-handoff.ts",
     "check:outbound": "node src/scripts/check-outbound-mode.mjs",
     "check:first-speech": "node src/scripts/check-outbound-mode.mjs",
-    "check:transcript": "node src/scripts/check-transcript.mjs",
+    "check:transcript": "tsx src/scripts/check-transcript.ts",
     "calendar:test": "tsx src/scripts/test-google-calendar.ts",
     "calendar:lifecycle-test": "tsx src/scripts/test-calendar-lifecycle.ts",
     "leadflow:test": "tsx src/scripts/test-leadflow-integration.ts",

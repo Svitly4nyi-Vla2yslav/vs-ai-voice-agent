@@ -374,6 +374,16 @@ assert.equal(
   firstTranscriptPayload.conversationId,
   "00000000-0000-4000-8000-000000000123",
 );
-assert.deepEqual(firstTranscriptPayload.segments, transcriptCheckpoint.segments);
+assert.deepEqual(firstTranscriptPayload.segments, [
+  {
+    sequence: 0,
+    speaker: "CUSTOMER",
+    text: "Guten Tag",
+    startMs: 100,
+    endMs: 500,
+  },
+]);
+assert.equal("source" in firstTranscriptPayload, false);
+assert.equal("delta" in firstTranscriptPayload.segments[0], false);
 
 console.log("LeadFlow checks passed (interaction/transcript contracts, canonical references, stable retry IDs, errors, and Calendar mapping).");

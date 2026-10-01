@@ -20,6 +20,9 @@ export type LeadFlowErrorCode =
   | "authentication_failure"
   | "leadflow_unavailable"
   | "lead_not_found"
+  | "call_task_not_found"
+  | "call_task_mismatch"
+  | "stale_revision"
   | "invalid_payload"
   | "event_conflict"
   | "timeout"
@@ -130,6 +133,30 @@ export const normalizeLeadFlowBaseUrl = (value: string): string => {
 };
 
 const errorFromStatus = async (response: Response): Promise<LeadFlowErrorCode> => {
+  let errorName = "";
+  try {
+    const body = (await response.json()) as unknown;
+    if (
+      body &&
+      typeof body === "object" &&
+      (("error" in body && typeof body.error === "string") ||
+        ("reason" in body && typeof body.reason === "string"))
+    ) {
+      errorName = "error" in body && typeof body.error === "string"
+        ? body.error
+        : "reason" in body && typeof body.reason === "string"
+          ? body.reason
+          : "";
+    }
+  } catch {
+    // Status mapping remains sufficient; raw provider bodies are never exposed.
+  }
+  if (errorName === "lead_not_found") return "lead_not_found";
+  if (errorName === "call_task_not_found") return "call_task_not_found";
+  if (errorName === "call_task_mismatch") return "call_task_mismatch";
+  if (errorName === "stale_revision") return "stale_revision";
+  if (errorName === "event_conflict") return "event_conflict";
+  if (errorName === "invalid_payload") return "invalid_payload";
   if (response.status === 401 || response.status === 403) {
     return "authentication_failure";
   }
@@ -350,11 +377,20 @@ export class LeadFlowClient {
     return voiceAgentTranscriptV1Schema.parse({
       contractVersion: "1.0",
       eventId,
-      source: "vs-ai-voice-agent",
       leadRef: { leadId: context.leadId },
       callTaskRef: { callTaskId: context.callTaskId },
       conversationId: context.conversationId,
-      ...input,
+      revision: input.revision,
+      state: input.state,
+      startedAt: input.startedAt,
+      ...(input.endedAt ? { endedAt: input.endedAt } : {}),
+      segments: input.segments.map(({ speaker, delta, startMs, endMs }, sequence) => ({
+        sequence,
+        speaker,
+        text: delta,
+        ...(startMs !== undefined ? { startMs } : {}),
+        ...(endMs !== undefined ? { endMs } : {}),
+      })),
     });
   }
 

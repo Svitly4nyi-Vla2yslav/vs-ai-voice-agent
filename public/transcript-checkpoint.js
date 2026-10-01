@@ -21,26 +21,60 @@ export const createTranscriptCheckpointManager = ({
     if (state === "PARTIAL" && snapshot.revision <= lastPersistedRevision) {
       return false;
     }
-    const response = await fetchImplementation("/api/leadflow/transcript", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        leadFlowSession,
-        ...snapshot,
-        state,
-      }),
-      keepalive,
-    });
+    let response;
+    try {
+      response = await fetchImplementation("/api/leadflow/transcript", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          leadFlowSession,
+          ...snapshot,
+          state,
+        }),
+        keepalive,
+      });
+    } catch {
+      onStatus("Transcript checkpoint failed: leadflow_unavailable");
+      return false;
+    }
+    let result;
+    try {
+      result = await response.json();
+    } catch {
+      result = undefined;
+    }
     if (!response.ok) {
-      onStatus("Transcript checkpoint failed");
+      const safeReasons = new Set([
+        "invalid_payload",
+        "authentication_failure",
+        "lead_not_found",
+        "call_task_not_found",
+        "call_task_mismatch",
+        "stale_revision",
+        "event_conflict",
+        "leadflow_unavailable",
+        "provider_error",
+      ]);
+      const reason = safeReasons.has(result?.status)
+        ? result.status
+        : "provider_error";
+      onStatus(`Transcript checkpoint failed: ${reason}`);
       return false;
     }
     lastPersistedRevision = snapshot.revision;
     lastPersistedTextSize = collector.getTotalTextSize();
     onStatus(state === "FINAL" ? "Transcript saved" : "Transcript checkpointed");
+    const calendarMirrorFailures = new Set([
+      "not_managed_by_emma",
+      "call_task_mismatch",
+      "calendar_transcript_mirror_failed",
+    ]);
+    if (state === "FINAL" && calendarMirrorFailures.has(result?.calendarMirrorStatus)) {
+      onStatus(`Transcript saved; Calendar mirror failed: ${result.calendarMirrorStatus}`);
+    }
     return true;
   };
 

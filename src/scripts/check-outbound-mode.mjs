@@ -71,7 +71,12 @@ assert.match(instructionSource, /Bitte rufen Sie nicht mehr an/);
 assert.match(instructionSource, /CONVERSATION MODE: OUTBOUND_SALES/);
 assert.match(instructionSource, /Emma hat diesen vorbereiteten Geschaeftsanruf initiiert/);
 assert.match(instructionSource, /Beginne diesen ausgehenden Anruf niemals/);
-assert.match(instructionSource, /automatisch transkribiert/);
+assert.doesNotMatch(
+  instructionSource,
+  /Das Gespräch wird zur Dokumentation automatisch transkribiert/,
+);
+assert.match(instructionSource, /Fuege keine automatische Transkriptions-/);
+assert.match(instructionSource, /Guten Tag, mein Name ist Emma/);
 assert.doesNotMatch(instructionSource, /Audio wird aufgezeichnet/);
 
 console.log(

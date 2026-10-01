@@ -29,7 +29,7 @@ const transcriptCheckpointRequestSchema = z
     state: z.enum(["PARTIAL", "FINAL"]),
     startedAt: z.string().datetime({ offset: true }),
     endedAt: z.string().datetime({ offset: true }).optional(),
-    segments: z.array(transcriptSegmentSchema).max(20_000),
+    segments: z.array(transcriptSegmentSchema).max(2_000),
   })
   .strict()
   .superRefine((value, context) => {
@@ -44,7 +44,7 @@ const transcriptCheckpointRequestSchema = z
       (total, segment) => total + segment.delta.length,
       0,
     );
-    if (characters > 1_000_000) {
+    if (characters > 250_000) {
       context.addIssue({
         code: "custom",
         path: ["segments"],
@@ -141,8 +141,12 @@ leadFlowRouter.post("/api/leadflow/transcript", async (request, response) => {
     return;
   }
   const parsed = transcriptCheckpointRequestSchema.safeParse(request.body);
-  if (!parsed.success || !env.LEADFLOW_INTEGRATION_TOKEN) {
-    response.status(400).json({ error: "Invalid transcript checkpoint" });
+  if (!parsed.success) {
+    response.status(400).json({ status: "invalid_payload" });
+    return;
+  }
+  if (!env.LEADFLOW_INTEGRATION_TOKEN) {
+    response.status(503).json({ status: "provider_error" });
     return;
   }
   const session = readLeadFlowSessionToken(
@@ -150,7 +154,7 @@ leadFlowRouter.post("/api/leadflow/transcript", async (request, response) => {
     env.LEADFLOW_INTEGRATION_TOKEN,
   );
   if (!session || session.version !== 2) {
-    response.status(401).json({ error: "Invalid LeadFlow session" });
+    response.status(401).json({ status: "authentication_failure" });
     return;
   }
 
@@ -175,7 +179,13 @@ leadFlowRouter.post("/api/leadflow/transcript", async (request, response) => {
       characterCount,
       status: persistence.error,
     });
-    response.status(502).json({ status: "persistence_failed" });
+    response.status(502).json({
+      status: persistence.error === "timeout"
+        ? "leadflow_unavailable"
+        : persistence.error === "configuration_missing"
+          ? "provider_error"
+          : persistence.error,
+    });
     return;
   }
 
