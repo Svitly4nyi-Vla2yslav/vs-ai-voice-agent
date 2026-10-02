@@ -6,6 +6,10 @@ import {
   type PrepareNextStepResult,
 } from "./types.js";
 
+/**
+ * Створює Zod-схему необов'язкового непорожнього рядка із заданою максимальною довжиною.
+ * `null` і рядки з одних пробілів нормалізуються до `undefined`.
+ */
 const optionalTrimmedString = (maximumLength: number) =>
   z.preprocess(
     (value) =>
@@ -15,6 +19,10 @@ const optionalTrimmedString = (maximumLength: number) =>
     z.string().trim().min(1).max(maximumLength).optional(),
   );
 
+/**
+ * Перевіряє не лише формат YYYY-MM-DD, а й існування календарної дати в UTC.
+ * Це відхиляє значення на кшталт 2026-02-31, які пройшли б звичайний regex.
+ */
 const isCalendarDate = (value: string) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return false;
@@ -76,6 +84,12 @@ export type PrepareNextStepInput = z.infer<
   typeof prepareNextStepInputSchema
 >;
 
+/**
+ * Перевіряє, чи вистачає даних для підготовки запитаної наступної дії.
+ * Для зустрічі/дзвінка вимагає дату й час або часовий інтервал, для надсилання
+ * інформації — email. Повертає або перелік відсутніх полів, або очищений payload;
+ * зовнішніх запитів, бронювання чи запису даних функція не виконує.
+ */
 export const prepareNextStep = (
   input: PrepareNextStepInput,
 ): PrepareNextStepResult => {
