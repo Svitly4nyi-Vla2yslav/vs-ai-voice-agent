@@ -8,6 +8,11 @@ export type PromptCacheTelemetry = PromptCacheUsage & {
   hitRate?: number;
 };
 
+/**
+ * Обчислює частку cached tokens від загальної кількості input tokens.
+ * Повертає `undefined`, якщо лічильники відсутні або inputTokens не додатний,
+ * щоб телеметрія не містила некоректного ділення чи штучного нуля.
+ */
 export const cacheHitRate = (
   inputTokens: number | undefined,
   cachedTokens: number | undefined,
@@ -18,6 +23,10 @@ export const cacheHitRate = (
     ? cachedTokens / inputTokens
     : undefined;
 
+/**
+ * Нормалізує доступні лічильники prompt cache в компактний об'єкт телеметрії.
+ * Пропускає поля зі значенням `undefined` і додає hitRate лише коли його можна обчислити.
+ */
 export const promptCacheTelemetry = (
   usage: PromptCacheUsage,
 ): PromptCacheTelemetry => {
@@ -36,6 +45,10 @@ export const promptCacheTelemetry = (
   };
 };
 
+/**
+ * Записує нормалізовану телеметрію prompt cache в інформаційний лог.
+ * Функція нічого не повертає; її єдиний побічний ефект — виклик `console.info`.
+ */
 export const logPromptCacheTelemetry = (usage: PromptCacheUsage): void => {
   console.info("[Prompt Cache]", promptCacheTelemetry(usage));
 };
