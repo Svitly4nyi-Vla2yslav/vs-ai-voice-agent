@@ -6,12 +6,15 @@ import {
   backendModelEnvironmentSchema,
 } from "../agent/backend-models.js";
 
+// Нормалізує необов’язкову змінну: порожній або пробільний рядок стає undefined,
+// а непорожнє значення повертається обрізаним валідатором Zod.
 const optionalEnvironmentValue = z.preprocess(
   (value) =>
     typeof value === "string" && value.trim() === "" ? undefined : value,
   z.string().trim().min(1).optional(),
 );
 
+// Перетворює допустимі текстові значення "true"/"false" на boolean; за відсутності повертає false.
 const optionalBoolean = z
   .enum(["true", "false"])
   .default("false")
@@ -73,6 +76,7 @@ const environmentSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65_535).default(3002),
 });
 
+// Перевірка виконується під час імпорту модуля, щоб сервер не стартував із некоректною конфігурацією.
 const parsedEnvironment = environmentSchema.safeParse(process.env);
 
 if (!parsedEnvironment.success) {
@@ -91,6 +95,8 @@ export type RuntimeEnvironment =
   | "branch-deploy"
   | "development";
 
+// Функція без аргументів визначає тип середовища з CONTEXT/NODE_ENV і повертає нормалізовану мітку.
+// Production має пріоритет; невідомі або відсутні значення безпечно трактуються як development.
 export const runtimeEnvironment = (): RuntimeEnvironment => {
   if (process.env.CONTEXT === "production" || process.env.NODE_ENV === "production") {
     return "production";
