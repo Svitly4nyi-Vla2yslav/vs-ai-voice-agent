@@ -19,6 +19,9 @@ export type SyncLeadFlowInteractionResult =
       externalActionPerformed: false;
     };
 
+// Синхронізує валідовану взаємодію з указаним leadId через переданий або стандартний LeadFlow-клієнт.
+// Повертає явний статус і ознаку зовнішньої дії; без leadId чи після помилки віддалений успіх не декларується.
+// Успішний і повторно прийнятий запити вважаються виконаною зовнішньою дією, а результат журналюється без payload.
 export const syncLeadFlowInteraction = async (
   input: SyncLeadFlowInteractionInput,
   leadId: string | undefined,
