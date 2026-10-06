@@ -9,6 +9,7 @@ import { executeAgentTool } from "../tools/index.js";
 
 export const toolsRouter = Router();
 
+// GET повертає лише ознаку готовності LeadFlow, забороняє кешування й не розкриває значення конфігурації.
 toolsRouter.get("/api/tools/leadflow-status", (_request, response) => {
   response.set("Cache-Control", "no-store");
   response.status(200).json({ configured: getLeadFlowClient().isConfigured() });
@@ -32,6 +33,8 @@ const toolExecutionRequestSchema = z
   })
   .strict();
 
+// POST приймає назву й аргументи інструмента, перевіряє same-origin та схему, відновлює серверний LeadFlow-контекст і запускає dispatcher.
+// Результат завжди позначається no-store; зовнішні побічні ефекти залежать від обраного інструмента й відбуваються лише після успішної валідації.
 toolsRouter.post("/api/tools/execute", async (request, response) => {
   if (!isSameOriginRequest(request)) {
     response.status(403).json({ error: "Unexpected request origin" });
