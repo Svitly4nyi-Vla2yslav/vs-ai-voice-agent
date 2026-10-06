@@ -23,10 +23,13 @@ app.use(liveRouter);
 app.use(toolsRouter);
 app.use(express.static("public"));
 
+// notFoundHandler завершує запити, які не обробили API-роутери або static middleware, стабільною JSON-відповіддю 404.
 const notFoundHandler: RequestHandler = (_request, response) => {
   response.status(404).json({ error: "Not found" });
 };
 
+// errorHandler є останнім запобіжником Express: журналює необроблену помилку та повертає клієнту узагальнену JSON-відповідь 500.
+// Аргумент _next навмисно присутній, щоб Express розпізнав функцію як error middleware.
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
   console.error("Unhandled request error", error);
   response.status(500).json({ error: "Internal server error" });
