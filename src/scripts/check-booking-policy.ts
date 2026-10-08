@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { DateTime } from "luxon";
 
 import {
+  VS_WEB_STUDIO_AGENT_INSTRUCTIONS,
+  VS_WEB_STUDIO_BACKEND_INSTRUCTIONS,
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  VS_WEB_STUDIO_LIVE_INSTRUCTIONS,
+} from "../agent/instructions.js";
+import {
   GoogleCalendarService,
   formatCalendarTranscript,
   isBlockingClientEvent,
@@ -90,6 +96,88 @@ const nearest = await service.getNextAvailableMeetingSlots(
 assert.equal(nearest.status, "available");
 assert.match(nearest.slots[0]?.start ?? "", /^2026-10-09T09:00:00/);
 
+const phoneBookingWithoutNumber = await service.bookMeeting({
+  contactName: "Alex",
+  start: "2026-10-09T12:00:00+02:00",
+  end: "2026-10-09T12:30:00+02:00",
+  timezone: "Europe/Berlin",
+  meetingMode: "PHONE",
+  confirmation: true,
+  idempotencyKey: "booking-policy-phone-1",
+});
+assert.deepEqual(
+  phoneBookingWithoutNumber,
+  { status: "details_required", externalActionPerformed: false },
+  "choosing PHONE without a confirmed callback number must not be bookable",
+);
+
+for (const instructions of [
+  VS_WEB_STUDIO_AGENT_INSTRUCTIONS,
+  VS_WEB_STUDIO_BACKEND_INSTRUCTIONS,
+  VS_WEB_STUDIO_LIVE_INSTRUCTIONS,
+]) {
+  assert.ok(
+    instructions.includes(VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY),
+    "every production instruction path includes the shared booking conversation policy",
+  );
+}
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /"Telefon" bestaetigt nur die Gespraechsart, niemals die Rueckrufnummer/,
+);
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /Soll der Rueckruf unter der bereits angegebenen Nummer erfolgen\?/,
+);
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /vollstaendige Nummer nicht aus/,
+);
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /Erfinde, errate oder vervollstaendige niemals eine Telefonnummer/,
+);
+
+for (const flexibleUtterance of [
+  "Egal.",
+  "Mir ist der Tag egal.",
+  "Nehmen Sie einfach den naechsten Termin.",
+]) {
+  assert.ok(
+    VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY.includes(`"${flexibleUtterance}"`),
+    `${flexibleUtterance} is explicitly covered by nearest-slot behavior`,
+  );
+}
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /getNextAvailableMeetingSlots aufgerufen wird/,
+);
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /Frage dann nicht erneut "Welcher Tag passt Ihnen\?"/,
+);
+
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /unavailable, outside_working_hours und slot_no_longer_available.*erfolgreicher Kalenderpruefung nicht buchbar/s,
+  "slot outcomes retain unavailable semantics",
+);
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /calendar_error, tool_error sowie Transport- oder Backend-Ausfaelle sind technische Fehler und beweisen niemals, dass der Slot belegt ist/,
+  "technical failures cannot be described as slot conflicts",
+);
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /Kalenderaktion hoechstens einmal/,
+  "a technical Calendar operation can be retried at most once",
+);
+assert.match(
+  VS_WEB_STUDIO_BOOKING_CONVERSATION_POLICY,
+  /genau einen menschlichen Rueckruf- oder Follow-up-Pfad/,
+  "technical failure terminates in one human fallback instead of an alternative-time loop",
+);
+
 const booking = await service.bookMeeting({
   contactName: "Alex",
   start: "2026-10-09T12:00:00+02:00",
@@ -115,4 +203,4 @@ assert.equal(
   "Calendar mirrors use the same readable speaker-turn format",
 );
 
-console.log("Booking policy checks passed (personal classification, client conflicts, 30-minute buffer, outside-hours alternatives, flexible nearest slot, and in-person place persistence).");
+console.log("Booking policy checks passed (personal classification, client conflicts, 30-minute buffer, outside-hours alternatives, flexible nearest-slot routing, confirmed PHONE callback number, technical-failure semantics, retry limit, human fallback, and in-person place persistence).");

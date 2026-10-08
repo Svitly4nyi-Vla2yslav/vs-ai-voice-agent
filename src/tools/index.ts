@@ -2,6 +2,7 @@ export {
   agentTools,
   bookMeetingToolDefinition,
   cancelMeetingToolDefinition,
+  createAgentToolExecutor,
   executeAgentTool,
   findEmmaMeetingsToolDefinition,
   getCalendarAvailabilityToolDefinition,
@@ -11,6 +12,9 @@ export {
   serializedAgentTools,
   updateMeetingDetailsToolDefinition,
   syncLeadFlowInteractionToolDefinition,
+  type AgentToolExecutionContext,
+  type AgentToolExecutionOverrides,
+  type AgentToolExecutor,
 } from "./registry.js";
 export {
   bookMeeting,

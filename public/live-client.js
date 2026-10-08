@@ -1,4 +1,9 @@
 import { createFirstSpeechGate } from "/outbound-opening.js";
+import {
+  executeToolRelayRequest,
+  TOOL_BACKEND_UNAVAILABLE,
+  TOOL_REQUEST_INVALID,
+} from "/tool-relay.js";
 
 const loggedLiveEvents = new Set([
   "session.started",
@@ -126,18 +131,6 @@ export const startLiveConversation = async ({
 
     if (handledToolCalls.has(item.call_id)) return;
     handledToolCalls.add(item.call_id);
-    const registeredTools = new Set([
-      "prepareNextStep",
-      "getCalendarAvailability",
-      "getNextAvailableMeetingSlots",
-      "bookMeeting",
-      "findEmmaMeetings",
-      "rescheduleMeeting",
-      "cancelMeeting",
-      "updateMeetingDetails",
-      "syncLeadFlowInteraction",
-    ]);
-    const isRegisteredTool = registeredTools.has(item.name);
     if (item.name === "getCalendarAvailability") {
       setToolActivity("Checking calendar");
     } else if (item.name === "getNextAvailableMeetingSlots") {
@@ -161,104 +154,83 @@ export const startLiveConversation = async ({
       setToolActivity("Tool error");
     }
 
-    let result;
-    try {
-      const response = await fetch("/api/tools/execute", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: item.name,
-          arguments: item.arguments,
-          context: leadFlowContext,
-        }),
-        signal,
-      });
+    const result = await executeToolRelayRequest({
+      name: item.name,
+      arguments: item.arguments,
+      leadFlowContext,
+      signal,
+    });
+    if (signal?.aborted || !result) return;
 
-      if (!response.ok) throw new Error("tool-execution-request-failed");
-      result = await response.json();
-      if (
-        !result ||
-        typeof result !== "object" ||
-        typeof result.externalActionPerformed !== "boolean" ||
-        typeof result.status !== "string"
-      ) {
-        throw new Error("invalid-tool-result");
-      }
-
-      if (result.status === "needs_clarification") {
-        setToolActivity("Clarification required");
-      } else if (result.status === "prepared_only") {
-        setToolActivity("prepareNextStep completed");
-      } else if (result.status === "available") {
-        setToolActivity("Slot available");
-      } else if (
-        result.status === "unavailable" ||
-        result.status === "outside_working_hours" ||
-        result.status === "slot_no_longer_available"
-      ) {
-        setToolActivity("Slot unavailable");
-      } else if (
-        result.status === "confirmed" &&
-        result.externalActionPerformed === true
-      ) {
-        setToolActivity("Meeting confirmed");
-      } else if (result.status === "meeting_found") {
-        setToolActivity("Meeting found");
-      } else if (result.status === "multiple_meetings") {
-        setToolActivity("Clarification required");
-      } else if (result.status === "rescheduled") {
-        setToolActivity("Meeting rescheduled");
-      } else if (result.status === "cancelled") {
-        setToolActivity("Meeting cancelled");
-      } else if (result.status === "details_updated") {
-        setToolActivity("Meeting details updated");
-      } else if (result.status === "synced") {
-        setToolActivity("LeadFlow synced");
-        setLeadFlowStatus("Synced");
-      } else if (result.status === "duplicate_accepted") {
-        setToolActivity("LeadFlow duplicate accepted");
-        setLeadFlowStatus("Duplicate accepted");
-      } else if (result.status === "leadflow_error") {
-        setToolActivity("LeadFlow sync error");
-        setLeadFlowStatus(
-          result.reason === "lead_not_found"
-            ? "Lead not found"
-            : result.reason === "configuration_missing"
-              ? "Not configured"
-              : "Sync error",
-        );
-      } else if (
-        result.status === "no_meetings" ||
-        result.status === "not_found" ||
-        result.status === "not_found_or_already_cancelled" ||
-        result.status === "not_managed_by_emma" ||
-        result.status === "recurring_event_not_supported" ||
-        result.status === "details_required" ||
-        result.status === "confirmation_required"
-      ) {
-        setToolActivity("Clarification required");
-      } else if (
-        result.status === "calendar_error" ||
-        result.status === "duplicate_conflict"
-      ) {
-        setToolActivity("Calendar error");
-      } else {
-        setToolActivity("Tool error");
-      }
-    } catch (error) {
-      if (signal?.aborted) return;
-      console.error("[Agent Tool] relay failed", {
-        tool: isRegisteredTool ? item.name : "unknown",
-      });
+    if (
+      result.status === "tool_error" &&
+      result.error === TOOL_REQUEST_INVALID
+    ) {
+      setToolActivity("Tool request invalid");
+    } else if (
+      result.status === "tool_error" &&
+      result.error === TOOL_BACKEND_UNAVAILABLE
+    ) {
+      setToolActivity("Tool backend unavailable");
+    } else if (result.status === "needs_clarification") {
+      setToolActivity("Clarification required");
+    } else if (result.status === "prepared_only") {
+      setToolActivity("prepareNextStep completed");
+    } else if (result.status === "available") {
+      setToolActivity("Slot available");
+    } else if (
+      result.status === "unavailable" ||
+      result.status === "outside_working_hours" ||
+      result.status === "slot_no_longer_available"
+    ) {
+      setToolActivity("Slot unavailable");
+    } else if (
+      result.status === "confirmed" &&
+      result.externalActionPerformed === true
+    ) {
+      setToolActivity("Meeting confirmed");
+    } else if (result.status === "meeting_found") {
+      setToolActivity("Meeting found");
+    } else if (result.status === "multiple_meetings") {
+      setToolActivity("Clarification required");
+    } else if (result.status === "rescheduled") {
+      setToolActivity("Meeting rescheduled");
+    } else if (result.status === "cancelled") {
+      setToolActivity("Meeting cancelled");
+    } else if (result.status === "details_updated") {
+      setToolActivity("Meeting details updated");
+    } else if (result.status === "synced") {
+      setToolActivity("LeadFlow synced");
+      setLeadFlowStatus("Synced");
+    } else if (result.status === "duplicate_accepted") {
+      setToolActivity("LeadFlow duplicate accepted");
+      setLeadFlowStatus("Duplicate accepted");
+    } else if (result.status === "leadflow_error") {
+      setToolActivity("LeadFlow sync error");
+      setLeadFlowStatus(
+        result.reason === "lead_not_found"
+          ? "Lead not found"
+          : result.reason === "configuration_missing"
+            ? "Not configured"
+            : "Sync error",
+      );
+    } else if (
+      result.status === "no_meetings" ||
+      result.status === "not_found" ||
+      result.status === "not_found_or_already_cancelled" ||
+      result.status === "not_managed_by_emma" ||
+      result.status === "recurring_event_not_supported" ||
+      result.status === "details_required" ||
+      result.status === "confirmation_required"
+    ) {
+      setToolActivity("Clarification required");
+    } else if (
+      result.status === "calendar_error" ||
+      result.status === "duplicate_conflict"
+    ) {
+      setToolActivity("Calendar error");
+    } else {
       setToolActivity("Tool error");
-      result = {
-        status: "tool_error",
-        error: "execution_failed",
-        externalActionPerformed: false,
-      };
     }
 
     try {

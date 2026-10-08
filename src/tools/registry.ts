@@ -26,6 +26,26 @@ import {
 } from "./leadflow.js";
 import type { AgentToolResult } from "./types.js";
 
+export type AgentToolExecutionOverrides = {
+  getCalendarAvailability?: typeof getCalendarAvailability | undefined;
+  getNextAvailableMeetingSlots?:
+    | typeof getNextAvailableMeetingSlots
+    | undefined;
+  bookMeeting?: typeof bookMeeting | undefined;
+};
+
+export type AgentToolExecutionContext = {
+  leadId?: string | undefined;
+  callTaskId?: string | undefined;
+  conversationId?: string | undefined;
+};
+
+export type AgentToolExecutor = (
+  name: string,
+  rawArguments: unknown,
+  context?: AgentToolExecutionContext,
+) => Promise<AgentToolResult>;
+
 const nullableString = { type: ["string", "null"] } as const;
 
 export const prepareNextStepToolDefinition = {
@@ -439,14 +459,11 @@ const failure = (
   externalActionPerformed: false,
 });
 
-export const executeAgentTool = async (
+const executeAgentToolWithOverrides = async (
   name: string,
   rawArguments: unknown,
-  context: {
-    leadId?: string | undefined;
-    callTaskId?: string | undefined;
-    conversationId?: string | undefined;
-  } = {},
+  context: AgentToolExecutionContext = {},
+  overrides: AgentToolExecutionOverrides,
 ): Promise<AgentToolResult> => {
   const safeToolName = registeredToolNames.has(name) ? name : "unknown";
   console.info("[Agent Tool] requested", { tool: safeToolName });
@@ -484,20 +501,28 @@ export const executeAgentTool = async (
       const parsed = getCalendarAvailabilityInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
-      result = await getCalendarAvailability(parsed.data);
+      result = await (
+        overrides.getCalendarAvailability ?? getCalendarAvailability
+      )(parsed.data);
     } else if (name === "bookMeeting") {
       const parsed = bookMeetingInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
-      result = await bookMeeting(parsed.data, {
-        callTaskId: context.callTaskId,
-        conversationId: context.conversationId,
-      });
+      result = await (overrides.bookMeeting ?? bookMeeting)(
+        parsed.data,
+        {
+          callTaskId: context.callTaskId,
+          conversationId: context.conversationId,
+        },
+      );
     } else if (name === "getNextAvailableMeetingSlots") {
       const parsed = getNextAvailableMeetingSlotsInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");
       console.info("[Agent Tool] validated", { tool: name });
-      result = await getNextAvailableMeetingSlots(parsed.data);
+      result = await (
+        overrides.getNextAvailableMeetingSlots ??
+        getNextAvailableMeetingSlots
+      )(parsed.data);
     } else if (name === "findEmmaMeetings") {
       const parsed = findEmmaMeetingsInputSchema.safeParse(argumentsValue);
       if (!parsed.success) return failure("invalid_arguments");
@@ -538,3 +563,11 @@ export const executeAgentTool = async (
     return failure("execution_failed");
   }
 };
+
+export const createAgentToolExecutor = (
+  overrides: AgentToolExecutionOverrides = {},
+): AgentToolExecutor =>
+  (name, rawArguments, context = {}) =>
+    executeAgentToolWithOverrides(name, rawArguments, context, overrides);
+
+export const executeAgentTool = createAgentToolExecutor();
