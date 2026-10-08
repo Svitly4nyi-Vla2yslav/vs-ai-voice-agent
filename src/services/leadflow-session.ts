@@ -17,6 +17,7 @@ import type { LeadFlowCallBrief } from "../contracts/leadflow.js";
 
 export const LEADFLOW_SESSION_LIFETIME_SECONDS = 30 * 60;
 
+// Створює повторно використовувану схему необов'язкового непорожнього тексту із заданим лімітом.
 const sessionText = (maximum = 2_000) =>
   z.string().trim().min(1).max(maximum).optional();
 
@@ -84,6 +85,10 @@ type NewSessionContext =
       "leadId" | "company" | "contactPerson"
     >;
 
+/**
+ * Залишає у брифі лише підтримувані поля та перевіряє їхні довжини.
+ * Повертає нормалізований контекст або кидає помилку Zod для некоректних даних.
+ */
 export const sanitizeCallBrief = (
   callBrief: LeadFlowCallBrief,
 ): SanitizedCallBrief =>
@@ -115,9 +120,14 @@ export const sanitizeCallBrief = (
       : {}),
   });
 
+// Виводить стабільний 256-бітний ключ із секрету в окремому просторі імен LeadFlow.
 const keyFromSecret = (secret: string): Buffer =>
   createHash("sha256").update(`vs-ai-leadflow-session:${secret}`).digest();
 
+/**
+ * Створює зашифрований AES-256-GCM токен на 30 хвилин.
+ * Для task-aware контексту додає UUID розмови; випадковий IV робить кожен токен унікальним.
+ */
 export const createLeadFlowSessionToken = (
   context: NewSessionContext,
   secret: string,
@@ -145,6 +155,10 @@ export const createLeadFlowSessionToken = (
     .join(".");
 };
 
+/**
+ * Розшифровує та автентифікує токен, перевіряє схему й часові межі.
+ * За будь-якої помилки, прострочення або часу видачі з майбутнього повертає undefined.
+ */
 export const readLeadFlowSessionToken = (
   token: string,
   secret: string,
@@ -182,6 +196,10 @@ export type LeadFlowToolContextInput = {
   devLeadId?: string | undefined;
 };
 
+/**
+ * Відновлює довірений контекст із токена або, лише в дозволеному dev-режимі,
+ * повертає ручний leadId. Зашифрована сесія завжди має пріоритет.
+ */
 export const resolveLeadFlowToolContext = (
   input: LeadFlowToolContextInput,
   options: {
@@ -205,14 +223,20 @@ export const resolveLeadFlowToolContext = (
   return undefined;
 };
 
+// Прибирає керівні символи й зайві пробіли перед включенням CRM-значення до промпта.
 const promptDataValue = (value: string): string =>
   value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s{2,}/g, " ").trim();
 
+// Вмикає режим вихідного продажу лише для task-aware сесій другої версії.
 export const conversationModeForLeadFlowContext = (
   context: LeadFlowSessionContext | undefined,
 ): ConversationMode | undefined =>
   context?.version === 2 ? OUTBOUND_SALES_CONVERSATION_MODE : undefined;
 
+/**
+ * Формує операторський контекст для моделі з локальною датою та очищеними CRM-даними.
+ * Недовірені поля ізолюються JSON-маркерами й не можуть змінювати системні правила.
+ */
 export const leadFlowConversationContext = (
   context: LeadFlowSessionContext,
   now = DateTime.now().setZone("Europe/Berlin"),
