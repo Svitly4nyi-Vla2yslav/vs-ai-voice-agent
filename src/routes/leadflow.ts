@@ -18,10 +18,15 @@ import { mirrorTranscriptToManagedMeeting } from "../tools/calendar.js";
 
 export const leadFlowRouter = Router();
 
+// Приймає лише одноразовий handoff-токен і відхиляє зайві поля запиту.
 const handoffRequestSchema = z
   .object({ handoffToken: z.string().trim().min(1).max(8_192) })
   .strict();
 
+/**
+ * Перевіряє контрольну точку транскрипту: FINAL потребує endedAt,
+ * а сукупний текст обмежено 250 000 символами незалежно від кількості сегментів.
+ */
 const transcriptCheckpointRequestSchema = z
   .object({
     leadFlowSession: z.string().trim().min(1).max(65_536),
@@ -53,6 +58,7 @@ const transcriptCheckpointRequestSchema = z
     }
   });
 
+// Повертає без кешування лише стан конфігурації інтеграції та середовище виконання.
 leadFlowRouter.get("/api/leadflow/status", (_request, response) => {
   response.set("Cache-Control", "no-store");
   const configuration = getLeadFlowClient().configurationStatus();
@@ -63,6 +69,7 @@ leadFlowRouter.get("/api/leadflow/status", (_request, response) => {
   });
 });
 
+// Запускає діагностику провайдера тільки для запиту з дозволеного origin.
 leadFlowRouter.get("/api/leadflow/diagnostic", async (request, response) => {
   response.set("Cache-Control", "no-store");
   if (!isSameOriginRequest(request)) {
@@ -72,6 +79,10 @@ leadFlowRouter.get("/api/leadflow/diagnostic", async (request, response) => {
   response.status(200).json(await getLeadFlowClient().diagnose());
 });
 
+/**
+ * Обмінює handoff-токен на короткоживучу зашифровану сесію.
+ * У відповідь повертає лише безпечний контекст дзвінка, а причини відмови нормалізує перед логуванням.
+ */
 leadFlowRouter.post("/api/leadflow/handoff", async (request, response) => {
   response.set("Cache-Control", "no-store");
   if (!isSameOriginRequest(request)) {
@@ -134,6 +145,10 @@ leadFlowRouter.post("/api/leadflow/handoff", async (request, response) => {
   });
 });
 
+/**
+ * Автентифікує task-aware сесію й передає версіоновану контрольну точку транскрипту в LeadFlow.
+ * Для фінального непорожнього транскрипту додатково запускає дзеркалювання в керовану зустріч календаря.
+ */
 leadFlowRouter.post("/api/leadflow/transcript", async (request, response) => {
   response.set("Cache-Control", "no-store");
   if (!isSameOriginRequest(request)) {
