@@ -388,6 +388,7 @@ export const syncLeadFlowInteractionToolDefinition = {
   },
 } satisfies FunctionTool;
 
+/** Рекурсивно копіює JSON-сумісне значення, сортуючи ключі об’єктів і зберігаючи порядок масивів. */
 const canonicalizeJsonValue = <T>(value: T): T => {
   if (Array.isArray(value)) {
     return value.map((item) => canonicalizeJsonValue(item)) as T;
@@ -404,6 +405,7 @@ const canonicalizeJsonValue = <T>(value: T): T => {
   return value;
 };
 
+/** Рекурсивно заморожує об’єкти й масиви, щоб опис інструментів не змінювався між запитами. */
 const freezeJsonValue = (value: unknown): void => {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
   for (const item of Object.values(value)) freezeJsonValue(item);
@@ -434,9 +436,8 @@ const agentToolDefinitions = {
   syncLeadFlowInteraction: syncLeadFlowInteractionToolDefinition,
 } satisfies Record<(typeof agentToolOrder)[number], FunctionTool>;
 
-// Build one canonical copy at module initialization. Object keys (including JSON
-// Schema properties) are sorted, tool order is explicit, and runtime freezing
-// prevents request- or lead-specific mutation.
+// Під час ініціалізації створюється одна канонічна копія: ключі (зокрема JSON Schema)
+// відсортовані, порядок інструментів заданий явно, а runtime-заморожування захищає від мутацій.
 export const agentTools: FunctionTool[] = agentToolOrder.map((name) =>
   canonicalizeJsonValue(agentToolDefinitions[name]),
 );
@@ -446,11 +447,13 @@ export const serializedAgentTools = JSON.stringify(agentTools);
 
 const registeredToolNames = new Set(agentTools.map((tool) => tool.name));
 
+/** Повертає готове значення без змін або розбирає JSON-рядок; помилковий JSON передає виняток викликачеві. */
 const parseArguments = (rawArguments: unknown): unknown => {
   if (typeof rawArguments !== "string") return rawArguments;
   return JSON.parse(rawArguments);
 };
 
+/** Формує уніфіковану помилку до виконання зовнішньої дії або після невдалого запуску інструмента. */
 const failure = (
   error: "unknown_tool" | "invalid_arguments" | "execution_failed",
 ): AgentToolResult => ({
@@ -459,6 +462,11 @@ const failure = (
   externalActionPerformed: false,
 });
 
+/**
+ * Перевіряє назву й аргументи, маршрутизує виклик до відповідного інструмента або override
+ * та повертає уніфікований результат. Журналює етапи без сирих аргументів, а винятки
+ * перетворює на `execution_failed`.
+ */
 const executeAgentToolWithOverrides = async (
   name: string,
   rawArguments: unknown,
@@ -564,6 +572,7 @@ const executeAgentToolWithOverrides = async (
   }
 };
 
+/** Створює executor із зафіксованими override-реалізаціями та передає контекст кожного виклику маршрутизатору. */
 export const createAgentToolExecutor = (
   overrides: AgentToolExecutionOverrides = {},
 ): AgentToolExecutor =>
