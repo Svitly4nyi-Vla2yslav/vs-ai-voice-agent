@@ -14,6 +14,11 @@ export interface BookingCalendarConfigurationResult {
  * @param options — політика, що визначає обов'язковість окремого booking-календаря.
  * @returns Контрольований статус конфігурації без розкриття самого calendarId.
  */
+/**
+ * Перевіряє ідентифікатор календаря бронювань після trim.
+ * Повертає configuration_missing для порожнього значення, за замовчуванням забороняє
+ * primary та дозволяє його лише коли requireDedicated явно вимкнено.
+ */
 export const validateBookingCalendarConfiguration = (
   calendarId: string | undefined,
   options: { requireDedicated: boolean } = { requireDedicated: true },
