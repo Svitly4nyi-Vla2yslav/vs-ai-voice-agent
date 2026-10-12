@@ -13,9 +13,14 @@ const registeredToolNames = new Set([
 export const TOOL_REQUEST_INVALID = "tool_request_invalid";
 export const TOOL_BACKEND_UNAVAILABLE = "tool_backend_unavailable";
 
+/** Перевіряє, що значення є рядком із хоча б одним непробільним символом. */
 const isNonEmptyString = (value) =>
   typeof value === "string" && value.trim().length > 0;
 
+/**
+ * Зводить browser-контекст до одного дозволеного ідентифікатора для backend relay.
+ * Валідна `leadFlowSession` має пріоритет над `devLeadId`; за відсутності обох повертає `undefined`.
+ */
 export const createToolExecutionContext = (leadFlowContext) => {
   if (!leadFlowContext || typeof leadFlowContext !== "object") {
     return undefined;
@@ -32,21 +37,25 @@ export const createToolExecutionContext = (leadFlowContext) => {
   return undefined;
 };
 
+/** Відносить HTTP 400 до помилки запиту, а всі інші або відсутні статуси — до недоступності backend. */
 export const categorizeToolRelayFailure = (httpStatus) =>
   httpStatus === 400 ? TOOL_REQUEST_INVALID : TOOL_BACKEND_UNAVAILABLE;
 
+/** Формує безпечний результат помилки й явно позначає, що зовнішня дія не підтверджена. */
 const failureResult = (category) => ({
   status: "tool_error",
   error: category,
   externalActionPerformed: false,
 });
 
+/** Перевіряє мінімальний контракт відповіді інструмента перед поверненням у live-клієнт. */
 const isValidToolResult = (result) =>
   result &&
   typeof result === "object" &&
   typeof result.externalActionPerformed === "boolean" &&
   typeof result.status === "string";
 
+/** Логує лише дозволене ім’я, статус і категорію; збій самого logger не впливає на результат relay. */
 const logRelayFailure = ({ name, httpStatus, category, logError }) => {
   const safeDetails = {
     tool: registeredToolNames.has(name) ? name : "unknown",
@@ -61,6 +70,11 @@ const logRelayFailure = ({ name, httpStatus, category, logError }) => {
   }
 };
 
+/**
+ * Надсилає same-origin POST до `/api/tools/execute`, додаючи лише нормалізований context.
+ * Успішну відповідь перевіряє за мінімальним контрактом; HTTP/мережеві/JSON-помилки
+ * перетворює на безпечну категорію, а навмисне скасований запит повертає як `undefined`.
+ */
 export const executeToolRelayRequest = async ({
   name,
   arguments: toolArguments,
