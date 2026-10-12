@@ -1,6 +1,11 @@
 export const OUTBOUND_SALES_MODE = "OUTBOUND_SALES";
 export const FIRST_SPEECH_TIMEOUT_MS = 30_000;
 
+/**
+ * Створює gate першої репліки для outbound-дзвінка.
+ * У звичайному режимі він одразу відкритий; у `OUTBOUND_SALES` очікує перший непорожній transcript,
+ * викликає `onFirstSpeech` один раз або завершує очікування через `onTimeout`.
+ */
 export const createFirstSpeechGate = ({
   conversationMode,
   onFirstSpeech,
@@ -14,12 +19,14 @@ export const createFirstSpeechGate = ({
   let unlocked = conversationMode !== OUTBOUND_SALES_MODE;
   let closed = false;
 
+  // Безпечно скасовує активний таймер і очищує посилання для повторних викликів.
   const cancelTimer = () => {
     if (timer !== undefined) clearTimer(timer);
     timer = undefined;
   };
 
   return {
+    // Запускає timeout лише один раз для ще закритого outbound gate.
     start() {
       if (started || closed || unlocked) return false;
       started = true;
@@ -31,6 +38,7 @@ export const createFirstSpeechGate = ({
       }, timeoutMs);
       return true;
     },
+    // Перший непорожній текст відкриває gate, скасовує timeout і передає початкову репліку callback.
     observeTranscript(delta) {
       if (
         closed ||
@@ -45,10 +53,12 @@ export const createFirstSpeechGate = ({
       onFirstSpeech(delta);
       return true;
     },
+    // Остаточно закриває gate та прибирає таймер без виклику timeout-callback.
     close() {
       closed = true;
       cancelTimer();
     },
+    // Дає викликачеві прочитати поточний стан без його зміни.
     isUnlocked() {
       return unlocked;
     },
