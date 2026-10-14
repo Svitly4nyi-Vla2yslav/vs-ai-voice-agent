@@ -1,3 +1,8 @@
+/**
+ * Створює колектор фрагментів розмови з live- і Realtime-джерел.
+ * now можна підмінити в тестах; повернений об'єкт накопичує сегменти, ревізію,
+ * часові межі та віддає нормалізований snapshot без мережевих побічних ефектів.
+ */
 export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
   let startedAt;
   let endedAt;
@@ -7,10 +12,12 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
   let segments = [];
   const realtimeItemOrder = [];
 
+  /** Збільшує монотонну ревізію після кожної зміни даних транскрипту. */
   const markChanged = () => {
     revision += 1;
   };
 
+  /** Реєструє item Realtime у серверному порядку, враховуючи previousItemId. */
   const registerRealtimeItem = (itemId, previousItemId) => {
     if (typeof itemId !== "string" || !itemId) return;
     const existingIndex = realtimeItemOrder.indexOf(itemId);
@@ -27,6 +34,10 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
     }
   };
 
+  /**
+   * Перевіряє мовця й непорожній delta та додає внутрішній сегмент.
+   * Повертає false після фіналізації або для невалідного фрагмента, інакше true.
+   */
   const add = ({ speaker, delta, startMs, endMs, itemId, source }) => {
     if (
       (speaker !== "CUSTOMER" && speaker !== "EMMA") ||
@@ -50,6 +61,7 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
     return true;
   };
 
+  /** Сортує live-сегменти за часом, Realtime — за item-порядком, решту — за sequence. */
   const orderedInternalSegments = () =>
     [...segments].sort((left, right) => {
       if (left.source === "live" && right.source === "live") {
@@ -69,6 +81,7 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
       return left.sequence - right.sequence;
     });
 
+  /** Об'єднує сусідні фрагменти, не додаючи пробіл перед пунктуацією чи після відкритої дужки. */
   const joinText = (left, right) => {
     if (!left) return right.trimStart();
     if (!right) return left;
@@ -79,6 +92,7 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
     return `${left} ${right}`;
   };
 
+  /** Визначає нову репліку за зміною мовця, itemId або тривалістю паузи. */
   const startsNewTurn = (previous, current) => {
     if (!previous || previous.speaker !== current.speaker) return true;
     if (
@@ -93,6 +107,7 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
     return pause >= 1_200 || (pause >= 500 && /[.!?â€¦][â€"']?\s*$/u.test(previous.delta));
   };
 
+  /** Згортає впорядковані фрагменти в очищені непорожні репліки для зовнішнього snapshot. */
   const snapshotSegments = () => {
     const turns = [];
     let previous;
@@ -117,17 +132,21 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
   };
 
   return {
+    /** Один раз фіксує час початку й повертає вже збережене значення при повторних викликах. */
     markStarted(value = now().toISOString()) {
       if (!startedAt) startedAt = value;
       return startedAt;
     },
+    /** Додає live-фрагмент клієнта через спільну валідацію add. */
     addCustomerFragment(fragment) {
       return add({ speaker: "CUSTOMER", source: "live", ...fragment });
     },
+    /** Додає live-фрагмент Emma через спільну валідацію add. */
     addEmmaFragment(fragment) {
       return add({ speaker: "EMMA", source: "live", ...fragment });
     },
     registerRealtimeItem,
+    /** Реєструє item за потреби й додає Realtime-фрагмент клієнта. */
     addRealtimeCustomerFragment(itemId, delta) {
       if (!realtimeItemOrder.includes(itemId)) registerRealtimeItem(itemId);
       return add({
@@ -137,6 +156,7 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
         delta,
       });
     },
+    /** Реєструє item за потреби й додає Realtime-фрагмент Emma. */
     addRealtimeEmmaFragment(itemId, delta) {
       if (!realtimeItemOrder.includes(itemId)) registerRealtimeItem(itemId);
       return add({
@@ -146,6 +166,10 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
         delta,
       });
     },
+    /**
+     * Замінює накопичені delta одного Realtime item остаточним transcript,
+     * зберігаючи найранішу sequence; повертає false для невалідних або фінальних даних.
+     */
     finalizeRealtimeTurn(speaker, itemId, transcript) {
       if (
         (speaker !== "CUSTOMER" && speaker !== "EMMA") ||
@@ -183,6 +207,7 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
       markChanged();
       return true;
     },
+    /** Один раз переводить колектор у FINAL, фіксує endedAt і збільшує ревізію. */
     markFinal(value = now().toISOString()) {
       if (state !== "FINAL") {
         state = "FINAL";
@@ -190,6 +215,7 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
         markChanged();
       }
     },
+    /** Повертає поточну ревізію, стан, часові межі та нормалізовані репліки. */
     snapshot() {
       return {
         revision,
@@ -199,14 +225,18 @@ export const createTranscriptCollector = ({ now = () => new Date() } = {}) => {
         segments: snapshotSegments(),
       };
     },
+    /** Повертає номер поточної ревізії без зміни стану. */
     getRevision() {
       return revision;
     },
+    /** Повертає кількість сирих внутрішніх сегментів до злиття в репліки. */
     getSegmentCount() {
       return segments.length;
     },
+    /** Повертає сумарну кількість символів у сирих сегментах. */
     getTotalTextSize() {
       return segments.reduce((total, segment) => total + segment.delta.length, 0);
     },
   };
 };
+
