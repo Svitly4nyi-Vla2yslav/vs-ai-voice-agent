@@ -1,3 +1,8 @@
+/**
+ * Створює менеджер періодичного й фінального збереження транскрипту в LeadFlow.
+ * Залежності таймерів, fetch і затримки ін'єктуються для тестів; усі записи
+ * серіалізуються через одну Promise-чергу, щоб ревізії не обганяли одна одну.
+ */
 export const createTranscriptCheckpointManager = ({
   collector,
   leadFlowSession,
@@ -19,6 +24,10 @@ export const createTranscriptCheckpointManager = ({
   let queue = Promise.resolve(false);
   let finalPromise;
 
+  /**
+   * Надсилає один snapshot, пропускаючи порожні або вже збережені PARTIAL-ревізії.
+   * Повертає структурований результат і розкриває назовні лише дозволені причини помилок.
+   */
   const sendOnce = async (state, keepalive = false) => {
     const snapshot = collector.snapshot();
     if (snapshot.segments.length === 0) return { ok: true, skipped: true };
@@ -80,6 +89,10 @@ export const createTranscriptCheckpointManager = ({
     return { ok: true };
   };
 
+  /**
+   * Виконує одну PARTIAL-спробу або кілька FINAL-спроб з експоненційною затримкою.
+   * Повертає boolean, записує діагностику кожної невдачі й повідомляє статус фіналу.
+   */
   const send = async (state, keepalive = false) => {
     const attempts = state === "FINAL" ? Math.max(1, finalAttempts) : 1;
     let result = { ok: false, reason: "provider_error" };
@@ -97,6 +110,7 @@ export const createTranscriptCheckpointManager = ({
     return false;
   };
 
+  /** Додає збереження до спільної черги навіть після відхилення попередньої операції. */
   const checkpoint = (state = "PARTIAL", keepalive = false) => {
     queue = queue.then(
       () => send(state, keepalive),
@@ -106,12 +120,14 @@ export const createTranscriptCheckpointManager = ({
   };
 
   return {
+    /** Запускає єдиний періодичний PARTIAL-checkpoint, якщо менеджер ще активний. */
     start() {
       if (interval || stopped) return;
       interval = setIntervalImplementation(() => {
         void checkpoint("PARTIAL");
       }, intervalMs);
     },
+    /** Позапланово ставить PARTIAL-checkpoint у чергу після досягнення текстового порога. */
     noteChanged() {
       if (
         !stopped &&
@@ -121,6 +137,10 @@ export const createTranscriptCheckpointManager = ({
       }
     },
     checkpoint,
+    /**
+     * Один раз зупиняє таймер, фіналізує колектор і повертає спільний Promise FINAL-запису.
+     * keepalive дозволяє браузеру завершити запит під час закриття сторінки.
+     */
     finalize({ keepalive = true } = {}) {
       if (finalPromise) return finalPromise;
       if (!stopped) {
@@ -132,6 +152,7 @@ export const createTranscriptCheckpointManager = ({
       finalPromise = checkpoint("FINAL", keepalive);
       return finalPromise;
     },
+    /** Зупиняє нові автоматичні checkpoint-и та очищує активний інтервал. */
     stop() {
       stopped = true;
       if (interval) clearIntervalImplementation(interval);
@@ -139,3 +160,4 @@ export const createTranscriptCheckpointManager = ({
     },
   };
 };
+
