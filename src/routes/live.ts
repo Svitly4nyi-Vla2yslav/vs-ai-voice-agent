@@ -35,6 +35,10 @@ const promptCacheUsageSchema = z
   })
   .strict();
 
+/**
+ * Приймає same-origin телеметрію кешу промпта, перевіряє числові поля й повертає обчислений hitRate.
+ * Записує агреговану телеметрію та забороняє кешування відповіді; не створює Live-сесію.
+ */
 liveRouter.post("/api/live/cache-usage", (request, response) => {
   if (!isSameOriginRequest(request)) {
     response.status(403).json({ error: "Unexpected request origin" });
@@ -55,6 +59,10 @@ liveRouter.post("/api/live/cache-usage", (request, response) => {
   });
 });
 
+/**
+ * Перевіряє same-origin SDP-запит, за потреби відновлює LeadFlow-контекст і створює OpenAI Live WebRTC-сесію.
+ * Повертає SDP зі статусом 201; помилки валідації дають 400, origin — 403, а upstream OpenAI — 502.
+ */
 liveRouter.post("/api/live/session", async (request, response) => {
   if (!isSameOriginRequest(request)) {
     response.status(403).json({ error: "Unexpected request origin" });
@@ -159,3 +167,4 @@ liveRouter.post("/api/live/session", async (request, response) => {
     response.status(502).json({ error: "Unable to create Live session" });
   }
 });
+
