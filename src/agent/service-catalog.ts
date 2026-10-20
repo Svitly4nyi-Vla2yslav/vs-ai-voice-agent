@@ -1,4 +1,5 @@
-// Stable, server-owned VS Web Studio knowledge. Never add lead/customer data here.
+// Стабільний server-owned каталог визначає лише перевірені послуги VS Web Studio.
+ // Дані лідів і клієнтів сюди не додаються; trim прибирає службовий перенос рядка шаблонного літерала.
 export const VS_WEB_STUDIO_SERVICE_CATALOG = `
 VERIFIZIERTER LEISTUNGSKATALOG VON VS WEB STUDIO
 
