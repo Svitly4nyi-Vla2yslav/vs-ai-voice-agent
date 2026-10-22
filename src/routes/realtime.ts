@@ -19,6 +19,11 @@ const voiceSelectionSchema = z
   })
   .strict();
 
+/**
+ * Видає короткоживучий Realtime client secret лише для same-origin запиту.
+ * Тіло проходить сувору Zod-перевірку; необов’язковий LeadFlow-токен додає
+ * перевірений контекст, а помилки OpenAI перетворюються на контрольовану відповідь 502.
+ */
 realtimeRouter.post("/api/realtime/client-secret", async (request, response) => {
   if (!isSameOriginRequest(request)) {
     response.status(403).json({ error: "Unexpected request origin" });
