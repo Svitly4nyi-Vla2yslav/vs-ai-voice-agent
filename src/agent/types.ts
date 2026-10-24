@@ -1,9 +1,13 @@
 import type { realtimeVoices } from "../config/env.js";
 
+// Типи цього модуля є спільною межею між конфігурацією середовища,
+// realtime-сеансом і UI. Вони не виконують запитів і не мають побічних ефектів.
+// RealtimeVoice виводиться з дозволеного списку, тому конфіг не прийме довільне ім'я.
 export type RealtimeVoice = (typeof realtimeVoices)[number];
 
 export const voiceLabVoices = ["shimmer", "coral", "marin"] as const;
 
+// VoiceLabVoice звужує загальний список до голосів, доступних у Voice Lab.
 export type VoiceLabVoice = (typeof voiceLabVoices)[number];
 
 // INBOUND_RECEPTION can be added here in a later phase without changing how
@@ -22,6 +26,7 @@ export const salesConversationStates = [
   "CLOSING",
 ] as const;
 
+// SalesConversationState описує етап вихідної розмови для UI та оркестратора.
 export type SalesConversationState =
   (typeof salesConversationStates)[number];
 
@@ -34,6 +39,7 @@ export const salesConversationOutcomes = [
   "DO_NOT_CONTACT",
 ] as const;
 
+// SalesConversationOutcome фіксує контрольований підсумок завершеної розмови.
 export type SalesConversationOutcome =
   (typeof salesConversationOutcomes)[number];
 
