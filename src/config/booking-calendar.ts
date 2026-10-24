@@ -8,16 +8,13 @@ export interface BookingCalendarConfigurationResult {
 }
 
 /**
- * Перевіряє наявність календаря та за потреби забороняє використання primary.
- *
- * @param calendarId — ідентифікатор календаря з конфігурації середовища.
- * @param options — політика, що визначає обов'язковість окремого booking-календаря.
- * @returns Контрольований статус конфігурації без розкриття самого calendarId.
- */
-/**
  * Перевіряє ідентифікатор календаря бронювань після trim.
- * Повертає configuration_missing для порожнього значення, за замовчуванням забороняє
- * primary та дозволяє його лише коли requireDedicated явно вимкнено.
+ *
+ * @param calendarId — значення з конфігурації середовища.
+ * @param options — політика окремого календаря; за замовчуванням забороняє primary.
+ * @returns Статус: відсутня конфігурація, primary не дозволено або все налаштовано.
+ *
+ * Функція не розкриває calendarId у результаті й не звертається до зовнішніх сервісів.
  */
 export const validateBookingCalendarConfiguration = (
   calendarId: string | undefined,
