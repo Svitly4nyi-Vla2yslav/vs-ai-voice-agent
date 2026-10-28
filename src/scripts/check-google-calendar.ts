@@ -11,6 +11,10 @@ import {
   type CalendarSettings,
 } from "../services/google-calendar.js";
 
+/**
+ * Читає змінну середовища за назвою, обрізає пробіли й повертає undefined для порожнього значення.
+ * Функція не змінює середовище та не виводить отримане значення.
+ */
 const value = (name: string): string | undefined => {
   const candidate = process.env[name]?.trim();
   return candidate ? candidate : undefined;
@@ -63,6 +67,10 @@ if (bookingCalendarConfiguration.status === "primary_calendar_not_allowed") {
     refreshToken,
   });
 
+  /**
+   * Зводить невідому помилку провайдера до одного з безпечних діагностичних кодів.
+   * Повертає лише категорію без тексту винятку, токенів, ідентифікаторів чи даних подій.
+   */
   const diagnosticReason = (error: unknown): string => {
     const reason: CalendarFailureResult["reason"] =
       error instanceof CalendarProviderError ? error.reason : "unavailable";
