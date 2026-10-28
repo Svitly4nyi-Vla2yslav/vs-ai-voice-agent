@@ -12,6 +12,10 @@ const quotaErrorCodes = new Set([
   "insufficient_quota",
 ]);
 
+/**
+ * Перетворює невідому помилку OpenAI або локальної конфігурації на безпечне повідомлення.
+ * Нічого не повертає й не виводить ключі чи тіло відповіді; побічний ефект — один запис у stderr.
+ */
 const reportFailure = (error: unknown): void => {
   if (error instanceof Error && error.message.includes("OPENAI_API_KEY")) {
     console.error("OpenAI connectivity check failed: OPENAI_API_KEY is missing.");
@@ -64,6 +68,11 @@ const reportFailure = (error: unknown): void => {
   console.error("OpenAI connectivity check failed: unexpected local error.");
 };
 
+/**
+ * Перевіряє мережевий доступ до OpenAI та наявність налаштованої backend-моделі.
+ * Повертає Promise без значення; у разі помилки делегує безпечний звіт і встановлює
+ * ненульовий process.exitCode, не завершуючи процес примусово.
+ */
 const checkOpenAI = async (): Promise<void> => {
   try {
     const [{ openAIClient }, { env }] = await Promise.all([
