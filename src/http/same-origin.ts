@@ -1,19 +1,18 @@
 import type { Request } from "express";
 
 /**
- * Бере перше значення з proxy-заголовка, де кілька вузлів розділені комами.
- *
- * @param value — необов'язковий вміст forwarded-заголовка.
- * @returns Перше непорожнє значення або undefined.
+ * Бере лише перший елемент forwarded-заголовка, де проксі-вузли розділені комами.
+ * @param value — необов’язковий рядок заголовка.
+ * @returns Обрізане непорожнє перше значення або undefined; вхідний рядок не змінюється.
  */
 const firstForwardedValue = (value: string | undefined): string | undefined =>
   value?.split(",", 1)[0]?.trim() || undefined;
 
 /**
- * Перевіряє, що браузерний запит походить із того самого origin, що й backend.
- *
- * @param request — Express-запит із Origin, Host та proxy-заголовками.
- * @returns true для same-origin або дозволеного loopback-випадку Netlify Dev.
+ * Перевіряє Origin браузерного запиту проти протоколу та ефективного Host backend.
+ * @param request — Express-запит; X-Forwarded-Host має пріоритет над Host.
+ * @returns true без Origin, для точного same-origin або вузького HTTP→HTTPS loopback-випадку Netlify Dev;
+ * повертає false за відсутнього Host, некоректного URL чи будь-якої іншої невідповідності.
  */
 export const isSameOriginRequest = (request: Request): boolean => {
   const origin = request.get("Origin");
