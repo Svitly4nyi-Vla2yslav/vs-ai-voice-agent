@@ -9,9 +9,9 @@ export const backendModelTestConfigurations = [
 ] as const;
 
 /**
- * Перевіряє змінну OPENAI_AGENT_MODEL як непорожній рядок після trim.
- * Runtime залишається конфігурованим для інших підтримуваних Responses-моделей,
- * а дві рекомендовані A/B-конфігурації окремо перевіряє check:prompt-cache.
+ * Zod-схема приймає текст OPENAI_AGENT_MODEL, обрізає пробіли й повертає непорожню назву моделі.
+ * Вона не обмежує runtime лише двома A/B-конфігураціями та не перевіряє мережевий доступ;
+ * baseline і experiment окремо використовуються діагностикою check:prompt-cache.
  */
 export const backendModelEnvironmentSchema = z
   .string()
