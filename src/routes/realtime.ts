@@ -10,8 +10,10 @@ import {
   readLeadFlowSessionToken,
 } from "../services/leadflow-session.js";
 
+/** Маршрутизатор видачі короткоживучих браузерних облікових даних Realtime API. */
 export const realtimeRouter = Router();
 
+// Приймає лише підтримуваний голос і обмежений за розміром підписаний контекст LeadFlow.
 const voiceSelectionSchema = z
   .object({
     voice: z.enum(realtimeVoices).optional(),
@@ -36,6 +38,7 @@ realtimeRouter.post("/api/realtime/client-secret", async (request, response) => 
     return;
   }
 
+  // Явний голос має пріоритет, інакше використовується перевірене серверне значення за замовчуванням.
   const selectedVoice =
     parsedRequest.data.voice ?? voiceAgentConfiguration.voice;
   const leadFlowContext = parsedRequest.data.leadFlowSession
@@ -55,6 +58,7 @@ realtimeRouter.post("/api/realtime/client-secret", async (request, response) => 
     : "";
 
   try {
+    // Secret діє 60 секунд; браузер отримує його без постійного server-side API key.
     const clientSecret = await openAIClient.realtime.clientSecrets.create({
       expires_after: {
         anchor: "created_at",
@@ -82,6 +86,7 @@ realtimeRouter.post("/api/realtime/client-secret", async (request, response) => 
       },
     });
 
+    // Чутливу короткоживучу відповідь заборонено зберігати у браузерних і проміжних кешах.
     response.set("Cache-Control", "no-store");
     response.status(201).json({ clientSecret: clientSecret.value });
   } catch (error: unknown) {
