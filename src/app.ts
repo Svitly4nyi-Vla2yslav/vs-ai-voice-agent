@@ -9,10 +9,14 @@ import { leadFlowRouter } from "./routes/leadflow.js";
 import { realtimeRouter } from "./routes/realtime.js";
 import { toolsRouter } from "./routes/tools.js";
 
+/**
+ * Складає Express-застосунок голосового агента: JSON parser, API-маршрути,
+ * статичний frontend і фінальні 404/500 middleware. Порядок монтування визначає,
+ * чи запит обробляється API, public-файлом або контрольованим fallback.
+ */
 const app = express();
 
-// Both the local reverse-proxy case and Netlify have one trusted proxy hop.
-// This lets Express derive request.protocol from X-Forwarded-Proto.
+// Локальний reverse proxy і Netlify мають один довірений hop, тому Express відновлює protocol з X-Forwarded-Proto.
 app.set("trust proxy", 1);
 
 app.use(express.json());
@@ -23,13 +27,15 @@ app.use(liveRouter);
 app.use(toolsRouter);
 app.use(express.static("public"));
 
-// notFoundHandler завершує запити, які не обробили API-роутери або static middleware, стабільною JSON-відповіддю 404.
+/** Завершує необроблений API/static запит сталою JSON-відповіддю 404 без зміни даних. */
 const notFoundHandler: RequestHandler = (_request, response) => {
   response.status(404).json({ error: "Not found" });
 };
 
-// errorHandler є останнім запобіжником Express: журналює необроблену помилку та повертає клієнту узагальнену JSON-відповідь 500.
-// Аргумент _next навмисно присутній, щоб Express розпізнав функцію як error middleware.
+/**
+ * Журналює необроблену помилку й повертає узагальнену JSON-відповідь 500.
+ * Четвертий аргумент _next навмисно зберігає сигнатуру Express error middleware.
+ */
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
   console.error("Unhandled request error", error);
   response.status(500).json({ error: "Internal server error" });
