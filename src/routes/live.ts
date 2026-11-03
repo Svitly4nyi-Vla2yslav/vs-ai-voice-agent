@@ -17,8 +17,10 @@ import {
 } from "../services/prompt-cache.js";
 import { agentTools } from "../tools/index.js";
 
+/** Об’єднує same-origin маршрути телеметрії prompt cache і створення WebRTC Live-сесії. */
 export const liveRouter = Router();
 
+/** Обмежує SDP, голос і необов’язковий зашифрований LeadFlow-контекст; зайві поля відхиляються. */
 const liveSessionRequestSchema = z
   .object({
     sdp: z.string().min(1).max(200_000),
@@ -27,6 +29,7 @@ const liveSessionRequestSchema = z
   })
   .strict();
 
+/** Приймає лише невід’ємні цілі лічильники токенів, потрібні для агрегованої телеметрії кешу. */
 const promptCacheUsageSchema = z
   .object({
     inputTokens: z.number().int().nonnegative(),
@@ -36,8 +39,8 @@ const promptCacheUsageSchema = z
   .strict();
 
 /**
- * Приймає same-origin телеметрію кешу промпта, перевіряє числові поля й повертає обчислений hitRate.
- * Записує агреговану телеметрію та забороняє кешування відповіді; не створює Live-сесію.
+ * Приймає same-origin телеметрію кешу промпта, перевіряє числові поля й повертає `202` з hitRate.
+ * Записує лише агреговану телеметрію, забороняє кешування відповіді та не створює Live-сесію.
  */
 liveRouter.post("/api/live/cache-usage", (request, response) => {
   if (!isSameOriginRequest(request)) {
@@ -60,8 +63,9 @@ liveRouter.post("/api/live/cache-usage", (request, response) => {
 });
 
 /**
- * Перевіряє same-origin SDP-запит, за потреби відновлює LeadFlow-контекст і створює OpenAI Live WebRTC-сесію.
- * Повертає SDP зі статусом 201; помилки валідації дають 400, origin — 403, а upstream OpenAI — 502.
+ * Перевіряє same-origin SDP-запит, за потреби відновлює task-aware LeadFlow-контекст і створює OpenAI Live WebRTC-сесію.
+ * До URL або відповіді не додає session token; повертає лише SDP зі статусом 201 і `no-store`.
+ * Помилки валідації дають 400, origin — 403, а будь-яка невдача upstream OpenAI — 502.
  */
 liveRouter.post("/api/live/session", async (request, response) => {
   if (!isSameOriginRequest(request)) {
