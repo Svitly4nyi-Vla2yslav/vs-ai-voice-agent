@@ -1,3 +1,4 @@
+
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
@@ -77,8 +78,15 @@ assert.doesNotMatch(
 );
 assert.match(instructionSource, /Fuege keine automatische Transkriptions-/);
 assert.match(instructionSource, /Guten Tag, mein Name ist Emma/);
+assert.match(instructionSource, /Erkenne die Sprache der ersten verstaendlichen Kundenaeusserung/);
+assert.match(instructionSource, /Kurdisch sowie baltische und andere Sprachen/);
+assert.match(instructionSource, /Google Meet ist die bevorzugte Online-Option/);
+assert.match(instructionSource, /Persoenlich.*noch keine vollstaendige Ortsangabe/);
+assert.match(instructionSource, /Strasse, Hausnummer, Ort/);
+assert.match(instructionSource, /Ein Ja zu einem freien Slot.*keine finale Buchungsbestaetigung/);
 assert.doesNotMatch(instructionSource, /Audio wird aufgezeichnet/);
 
 console.log(
   "First-speech checks passed (silent startup, transcript-only unlock, exactly-once greeting, timeout cancellation/closure, and hard-stop preservation).",
 );
+
