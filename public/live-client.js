@@ -14,6 +14,12 @@ const loggedLiveEvents = new Set([
   "info",
 ]);
 
+/**
+ * Записує лише дозволені службові поля live-подій, не виводячи транскрипт
+ * або довільний payload сервера.
+ *
+ * @param {object} serverEvent — подія live-сесії.
+ */
 const logLiveEvent = (serverEvent) => {
   if (!loggedLiveEvents.has(serverEvent.type)) return;
 
@@ -38,6 +44,14 @@ const logLiveEvent = (serverEvent) => {
   console[logMethod]("[OpenAI Live]", safeDetails);
 };
 
+/**
+ * Створює WebRTC live-сесію, підключає аудіо, обробляє серверні події
+ * й послідовно передає tool calls до backend relay.
+ *
+ * @returns {Promise<Function>} Функцію закриття, яка зупиняє медіа,
+ * таймери, data channel і peer connection.
+ * @sideEffects Запитує мікрофон, виконує HTTP/WebRTC-запити та оновлює UI callbacks.
+ */
 export const startLiveConversation = async ({
   voice,
   remoteAudio,
@@ -60,6 +74,11 @@ export const startLiveConversation = async ({
   const handledToolCalls = new Set();
   let toolQueue = Promise.resolve();
 
+  /**
+   * Витягує лише коректні невід’ємні лічильники prompt cache з response usage.
+   *
+   * @returns Об’єкт телеметрії або undefined, якщо input_tokens невалідний.
+   */
   const promptCacheUsageFromResponse = (response) => {
     const usage = response?.usage;
     if (!Number.isInteger(usage?.input_tokens) || usage.input_tokens < 0) {
@@ -80,6 +99,10 @@ export const startLiveConversation = async ({
     };
   };
 
+  /**
+   * Надсилає діагностичну статистику кешу й оновлює hit rate у UI.
+   * Помилки навмисно ігноруються, щоб телеметрія не переривала дзвінок.
+   */
   const reportPromptCacheUsage = async (usage) => {
     try {
       const response = await fetch("/api/live/cache-usage", {
@@ -101,6 +124,11 @@ export const startLiveConversation = async ({
     }
   };
 
+  /**
+   * Серіалізує клієнтську подію у відкритий data channel.
+   *
+   * @throws Error, якщо розмову вже закрито або канал не готовий.
+   */
   const sendLiveEvent = (clientEvent) => {
     if (closed || channel?.readyState !== "open") {
       throw new Error("live-channel-unavailable");
@@ -117,6 +145,10 @@ export const startLiveConversation = async ({
     },
   });
 
+  /**
+   * Перевіряє function_call, захищає від повторного call_id і виконує relay-запит.
+   * Результат або безпечну помилку повертає моделі через live channel.
+   */
   const executeToolCall = async (item) => {
     if (
       item?.type !== "function_call" ||
@@ -248,6 +280,7 @@ export const startLiveConversation = async ({
     }
   };
 
+  /** Обробляє вкладену response-подію та додає валідний tool call у послідовну чергу. */
   const handleResponseEvent = (serverEvent) => {
     const nestedEvent = serverEvent.event;
     if (
@@ -265,6 +298,10 @@ export const startLiveConversation = async ({
     }
   };
 
+  /**
+   * Ідемпотентно завершує розмову: скасовує таймери, gate, checkpoint,
+   * зупиняє треки та закриває channel і peer connection.
+   */
   const close = () => {
     if (closed) return;
     closed = true;
