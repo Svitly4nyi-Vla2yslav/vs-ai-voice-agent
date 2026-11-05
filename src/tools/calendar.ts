@@ -20,11 +20,13 @@ import {
   type CalendarTranscriptSegment,
 } from "../services/google-calendar.js";
 
+/** Перетворює null і порожні рядки на undefined для коректної роботи optional Zod-полів. */
 const emptyToUndefined = (value: unknown): unknown =>
   value === null || (typeof value === "string" && value.trim() === "")
     ? undefined
     : value;
 
+/** Створює схему необов’язкового непорожнього рядка із заданою максимальною довжиною. */
 const optionalString = (maximum: number) =>
   z.preprocess(
     emptyToUndefined,
@@ -339,6 +341,12 @@ let calendarConfigurationFailure:
   | "configuration"
   | "dedicated_booking_calendar_required" = "configuration";
 
+/**
+ * Ліниво створює та кешує календарний сервіс після перевірки конфігурації.
+ *
+ * @returns Налаштований сервіс або undefined, якщо календар, облікові дані чи
+ * робочі години невалідні. Зовнішніх запитів під час створення не виконує.
+ */
 const getConfiguredCalendarService = (): GoogleCalendarService | undefined => {
   if (calendarService) return calendarService;
   const bookingCalendarConfiguration = validateBookingCalendarConfiguration(
@@ -383,12 +391,18 @@ const getConfiguredCalendarService = (): GoogleCalendarService | undefined => {
   return calendarService;
 };
 
+/** Повертає уніфіковану безпечну відповідь для операції без налаштованого календаря. */
 const notConfigured = () => ({
   status: "calendar_error" as const,
   reason: calendarConfigurationFailure,
   externalActionPerformed: false as const,
 });
 
+/**
+ * Класифікує результат календарної операції для журналу й повертає його без змін.
+ *
+ * @sideEffects Записує лише назву операції та категорію, без контактних даних.
+ */
 const withCalendarDiagnostic = <T extends { status: string }>(
   operation: string,
   result: T,
@@ -417,6 +431,7 @@ const withCalendarDiagnostic = <T extends { status: string }>(
   return result;
 };
 
+/** Перевіряє доступність через налаштований сервіс і додає безпечну діагностику результату. */
 export const getCalendarAvailability = async (
   input: GetCalendarAvailabilityInput,
 ): Promise<AvailabilityResult> => {
@@ -426,6 +441,7 @@ export const getCalendarAvailability = async (
   return withCalendarDiagnostic("availability", result);
 };
 
+/** Повертає наступні вільні слоти або уніфіковану помилку конфігурації. */
 export const getNextAvailableMeetingSlots = async (
   input: GetNextAvailableMeetingSlotsInput,
 ): Promise<NextAvailableMeetingSlotsResult> => {
@@ -437,6 +453,11 @@ export const getNextAvailableMeetingSlots = async (
   );
 };
 
+/**
+ * Створює зустріч лише після явного confirmation=true.
+ *
+ * @sideEffects За валідної конфігурації може створити подію у Google Calendar.
+ */
 export const bookMeeting = async (
   input: BookMeetingInput,
   context: {
@@ -458,6 +479,11 @@ export const bookMeeting = async (
   );
 };
 
+/**
+ * Передає сегменти транскрипту керованій зустрічі; без сервісу повертає fail-closed результат.
+ *
+ * @sideEffects За валідної конфігурації може оновити опис календарної події.
+ */
 export const mirrorTranscriptToManagedMeeting = async (
   context: { callTaskId: string; conversationId: string },
   segments: CalendarTranscriptSegment[],
@@ -472,6 +498,7 @@ export const mirrorTranscriptToManagedMeeting = async (
   return service.mirrorTranscriptForConversation(context, segments);
 };
 
+/** Шукає керовані агентом зустрічі за перевіреними фільтрами без зміни календаря. */
 export const findEmmaMeetings = async (
   input: FindEmmaMeetingsInput,
 ): Promise<FindEmmaMeetingsResult> => {
@@ -480,6 +507,7 @@ export const findEmmaMeetings = async (
   return withCalendarDiagnostic("find", await service.findEmmaMeetings(input));
 };
 
+/** Переносить підтверджену зустріч через сервіс і журналює лише категорію результату. */
 export const rescheduleMeeting = async (
   input: RescheduleMeetingInput,
 ): Promise<RescheduleMeetingResult> => {
@@ -488,6 +516,7 @@ export const rescheduleMeeting = async (
   return withCalendarDiagnostic("reschedule", await service.rescheduleMeeting(input));
 };
 
+/** Скасовує явно підтверджену зустріч через календарний сервіс. */
 export const cancelMeeting = async (
   input: CancelMeetingInput,
 ): Promise<CancelMeetingResult> => {
@@ -496,6 +525,7 @@ export const cancelMeeting = async (
   return withCalendarDiagnostic("cancel", await service.cancelMeeting(input));
 };
 
+/** Оновлює щонайменше одне перевірене поле зустрічі, не змінюючи час події. */
 export const updateMeetingDetails = async (
   input: UpdateMeetingDetailsInput,
 ): Promise<UpdateMeetingDetailsResult> => {
