@@ -194,7 +194,27 @@ leadFlowRouter.post("/api/leadflow/transcript", async (request, response) => {
       characterCount,
       status: persistence.error,
     });
-    response.status(502).json({
+    const conflictStatuses = new Set([
+      "event_conflict",
+      "revision_conflict",
+      "final_conversation_conflict",
+      "final_cannot_be_downgraded",
+      "stale_revision",
+      "call_task_mismatch",
+    ]);
+    const responseStatus = conflictStatuses.has(persistence.error)
+      ? 409
+      : persistence.error === "authentication_failure"
+        ? 401
+        : persistence.error === "lead_not_found" ||
+            persistence.error === "call_task_not_found"
+          ? 404
+          : persistence.error === "invalid_payload"
+            ? 400
+            : persistence.error === "configuration_missing"
+              ? 503
+              : 502;
+    response.status(responseStatus).json({
       status: persistence.error === "timeout"
         ? "leadflow_unavailable"
         : persistence.error === "configuration_missing"

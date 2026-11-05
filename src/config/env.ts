@@ -103,5 +103,16 @@ export const runtimeEnvironment = (): RuntimeEnvironment => {
   }
   if (process.env.CONTEXT === "deploy-preview") return "deploy-preview";
   if (process.env.CONTEXT === "branch-deploy") return "branch-deploy";
+  // Netlify Functions may omit CONTEXT/NODE_ENV from the bundled runtime even
+  // though URL/DEPLOY_PRIME_URL and NETLIFY are present. Treat that hosted
+  // runtime as production so production-only calendar isolation cannot be
+  // silently disabled.
+  if (
+    process.env.NETLIFY === "true" ||
+    Boolean(process.env.DEPLOY_PRIME_URL) ||
+    Boolean(process.env.URL)
+  ) {
+    return "production";
+  }
   return "development";
 };

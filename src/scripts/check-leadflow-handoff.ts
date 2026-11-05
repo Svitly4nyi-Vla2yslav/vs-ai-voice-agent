@@ -62,6 +62,8 @@ const resolvedLead = {
     company: "Muster GmbH",
     contactPerson: "Max Mustermann",
     preferredLanguage: "de" as const,
+    phone: "+49 511 123456",
+    email: "max@example.com",
     decisionMaker: "Geschaeftsfuehrung",
     currentSituation: "Website seems outdated",
     painPoints: "Unklare mobile Conversion",
@@ -250,6 +252,20 @@ assert.match(
     : "",
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
   "server-generated conversation ID is sealed into task-aware context",
+);
+assert.equal(
+  sessionContext && "callBrief" in sessionContext
+    ? sessionContext.callBrief.phone
+    : undefined,
+  "+49 511 123456",
+  "verified CRM phone is available for a PHONE meeting booking",
+);
+assert.equal(
+  sessionContext && "callBrief" in sessionContext
+    ? sessionContext.callBrief.email
+    : undefined,
+  "max@example.com",
+  "verified CRM email is available for a Google Meet booking",
 );
 assert.equal(sessionToken.includes("canonical-lead-123"), false, "raw ID is not exposed");
 assert.equal(sessionToken.includes("canonical-task-123"), false, "raw task ID is not exposed");

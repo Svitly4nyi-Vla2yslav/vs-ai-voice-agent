@@ -18,6 +18,29 @@ import {
   rescheduleMeetingInputSchema,
   updateMeetingDetailsInputSchema,
 } from "../tools/calendar.js";
+import { runtimeEnvironment } from "../config/env.js";
+
+const hostedEnvironmentSnapshot = {
+  CONTEXT: process.env.CONTEXT,
+  NODE_ENV: process.env.NODE_ENV,
+  NETLIFY: process.env.NETLIFY,
+  DEPLOY_PRIME_URL: process.env.DEPLOY_PRIME_URL,
+  URL: process.env.URL,
+};
+delete process.env.CONTEXT;
+delete process.env.NODE_ENV;
+delete process.env.DEPLOY_PRIME_URL;
+delete process.env.URL;
+process.env.NETLIFY = "true";
+assert.equal(
+  runtimeEnvironment(),
+  "production",
+  "a hosted Netlify Function must not silently use development calendar policy",
+);
+for (const [key, value] of Object.entries(hostedEnvironmentSnapshot)) {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
 
 const settings: CalendarSettings = {
   calendarId: "vs-web-studio-booking",

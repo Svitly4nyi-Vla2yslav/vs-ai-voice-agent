@@ -274,6 +274,38 @@ const responseResult = await client.sendTranscript(
 );
 assert.equal(responseResult.ok, true, "LeadFlow 2xx response must be accepted");
 
+for (const reason of [
+  "revision_conflict",
+  "final_conversation_conflict",
+  "final_cannot_be_downgraded",
+] as const) {
+  const conflictClient = new LeadFlowClient({
+    baseUrl: "https://leadflow.example",
+    token: "secret",
+    maxTransportRetries: 0,
+    createEventId: () => "00000000-0000-4000-8000-000000000456",
+    fetchImplementation: async () => new Response(JSON.stringify({ error: reason }), {
+      status: 409,
+      headers: { "Content-Type": "application/json" },
+    }),
+  });
+  const conflictResult = await conflictClient.sendTranscript(
+    {
+      leadId: "lead-canonical",
+      callTaskId: "task-canonical",
+      conversationId: "00000000-0000-4000-8000-000000000123",
+    },
+    {
+      revision: 1,
+      state: "PARTIAL",
+      startedAt: "2026-09-30T10:00:00.000Z",
+      segments: [{ speaker: "CUSTOMER", delta: "Guten Tag" }],
+    },
+  );
+  assert.equal(conflictResult.ok, false);
+  if (!conflictResult.ok) assert.equal(conflictResult.error, reason);
+}
+
 const [routeSource, leadFlowSource, instructionSource, serviceCatalogSource, outboundSource, stylesSource] =
   await Promise.all([
     readFile(new URL("../routes/leadflow.ts", import.meta.url), "utf8"),

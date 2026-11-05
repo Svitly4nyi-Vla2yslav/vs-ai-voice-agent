@@ -23,6 +23,9 @@ export type LeadFlowErrorCode =
   | "call_task_not_found"
   | "call_task_mismatch"
   | "stale_revision"
+  | "revision_conflict"
+  | "final_conversation_conflict"
+  | "final_cannot_be_downgraded"
   | "invalid_payload"
   | "event_conflict"
   | "timeout"
@@ -155,6 +158,9 @@ const errorFromStatus = async (response: Response): Promise<LeadFlowErrorCode> =
   if (errorName === "call_task_not_found") return "call_task_not_found";
   if (errorName === "call_task_mismatch") return "call_task_mismatch";
   if (errorName === "stale_revision") return "stale_revision";
+  if (errorName === "revision_conflict") return "revision_conflict";
+  if (errorName === "final_conversation_conflict") return "final_conversation_conflict";
+  if (errorName === "final_cannot_be_downgraded") return "final_cannot_be_downgraded";
   if (errorName === "event_conflict") return "event_conflict";
   if (errorName === "invalid_payload") return "invalid_payload";
   if (response.status === 401 || response.status === 403) {

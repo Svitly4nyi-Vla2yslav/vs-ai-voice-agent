@@ -24,6 +24,8 @@ const sessionText = (maximum = 2_000) =>
 export const sanitizedCallBriefSchema = z
   .object({
     preferredLanguage: z.enum(["de", "uk", "ru", "en"]).optional(),
+    phone: sessionText(32),
+    email: z.string().trim().email().max(254).optional(),
     decisionMaker: sessionText(),
     currentSituation: sessionText(),
     painPoints: sessionText(),
@@ -96,6 +98,8 @@ export const sanitizeCallBrief = (
     ...(callBrief.preferredLanguage
       ? { preferredLanguage: callBrief.preferredLanguage }
       : {}),
+    ...(callBrief.phone ? { phone: callBrief.phone } : {}),
+    ...(callBrief.email ? { email: callBrief.email } : {}),
     ...(callBrief.decisionMaker
       ? { decisionMaker: callBrief.decisionMaker }
       : {}),

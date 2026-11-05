@@ -66,6 +66,9 @@ export const createTranscriptCheckpointManager = ({
         "call_task_not_found",
         "call_task_mismatch",
         "stale_revision",
+        "revision_conflict",
+        "final_conversation_conflict",
+        "final_cannot_be_downgraded",
         "event_conflict",
         "leadflow_unavailable",
         "provider_error",
@@ -100,6 +103,13 @@ export const createTranscriptCheckpointManager = ({
       result = await sendOnce(state, keepalive);
       if (result.ok) return true;
       onDiagnostic({ state, attempt, attempts, reason: result.reason });
+      const terminalConflicts = new Set([
+        "revision_conflict",
+        "final_conversation_conflict",
+        "final_cannot_be_downgraded",
+        "stale_revision",
+      ]);
+      if (terminalConflicts.has(result.reason)) break;
       if (attempt < attempts) {
         await delayImplementation(retryDelayMs * 2 ** (attempt - 1));
       }
