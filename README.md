@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Phase 5D-C2 plus Prompt Cache Optimization — Phase 1.** `gpt-live-1` remains the preferred conversational voice model, with Realtime as fallback. Outbound sessions now wait for intelligible customer transcript text before Emma's disclosed introduction, collect text-only transcripts with durable LeadFlow checkpoints, offer server-calculated nearest Calendar slots, and mirror a final transcript only into the matching Emma-managed meeting. See [the Phase 5D-C2 architecture and manual test](docs/phase-5d-c2-transcript-and-scheduling.md) and [the Prompt Cache Phase 1 architecture](docs/prompt-cache-phase-1.md).
+**Phase 5D-C2 plus Prompt Cache Optimization — Phase 1.** `gpt-live-1` remains the preferred conversational voice model, with Realtime as fallback. Outbound sessions now wait for intelligible customer transcript text before Emma's disclosed introduction, collect text-only transcripts with durable LeadFlow checkpoints, offer server-calculated nearest Calendar slots, and mirror a final transcript only into the matching Emma-managed meeting. 
 
 The verified task-aware LeadFlow session still selects `OUTBOUND_SALES` server-side. Emma remains the business initiator but waits silently for the customer's first intelligible utterance, then identifies herself as the AI assistant of VS Web Studio, discloses automatic transcription, uses the verified Call Brief, and leads with one relevant discovery question. The Realtime fallback, Phase 4D Calendar lifecycle, and Phase 5A/5C verified writeback and handoff behavior are preserved.
 
