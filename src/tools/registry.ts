@@ -46,6 +46,7 @@ export type AgentToolExecutor = (
   context?: AgentToolExecutionContext,
 ) => Promise<AgentToolResult>;
 
+// Спільний фрагмент JSON Schema гарантує однаковий контракт nullable-рядків у всіх tools.
 const nullableString = { type: ["string", "null"] } as const;
 
 export const prepareNextStepToolDefinition = {
@@ -412,6 +413,7 @@ const freezeJsonValue = (value: unknown): void => {
   Object.freeze(value);
 };
 
+// Явний порядок робить serializedAgentTools стабільним незалежно від порядку оголошення об’єктів.
 const agentToolOrder = [
   "prepareNextStep",
   "getCalendarAvailability",
@@ -443,8 +445,10 @@ export const agentTools: FunctionTool[] = agentToolOrder.map((name) =>
 );
 freezeJsonValue(agentTools);
 
+// Серіалізована канонічна копія придатна для стабільного prompt cache та порівняння конфігурацій.
 export const serializedAgentTools = JSON.stringify(agentTools);
 
+// Set використовується для fail-closed перевірки назви до розбору й виконання аргументів.
 const registeredToolNames = new Set(agentTools.map((tool) => tool.name));
 
 /** Повертає готове значення без змін або розбирає JSON-рядок; помилковий JSON передає виняток викликачеві. */
@@ -579,4 +583,5 @@ export const createAgentToolExecutor = (
   (name, rawArguments, context = {}) =>
     executeAgentToolWithOverrides(name, rawArguments, context, overrides);
 
+/** Стандартний executor без тестових override; усі виклики проходять спільну валідацію й журналювання. */
 export const executeAgentTool = createAgentToolExecutor();
