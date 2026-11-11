@@ -17,7 +17,8 @@ import type { LeadFlowCallBrief } from "../contracts/leadflow.js";
 
 export const LEADFLOW_SESSION_LIFETIME_SECONDS = 30 * 60;
 
-// Створює повторно використовувану схему необов'язкового непорожнього тексту із заданим лімітом.
+/** Створює Zod-схему необов'язкового trim-рядка з довжиною від 1 до maximum. */
+
 const sessionText = (maximum = 2_000) =>
   z.string().trim().min(1).max(maximum).optional();
 
@@ -124,7 +125,11 @@ export const sanitizeCallBrief = (
       : {}),
   });
 
-// Виводить стабільний 256-бітний ключ із секрету в окремому просторі імен LeadFlow.
+/**
+ * Виводить стабільний 256-бітний ключ із секрету в окремому просторі імен LeadFlow.
+ * Сирий секрет не зберігається в payload і не повертається викликачеві.
+ */
+
 const keyFromSecret = (secret: string): Buffer =>
   createHash("sha256").update(`vs-ai-leadflow-session:${secret}`).digest();
 
@@ -227,11 +232,16 @@ export const resolveLeadFlowToolContext = (
   return undefined;
 };
 
-// Прибирає керівні символи й зайві пробіли перед включенням CRM-значення до промпта.
+/** Прибирає керівні символи й стискає пробіли перед включенням CRM-значення до промпта. */
+
 const promptDataValue = (value: string): string =>
   value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s{2,}/g, " ").trim();
 
-// Вмикає режим вихідного продажу лише для task-aware сесій другої версії.
+/**
+ * Повертає режим вихідного продажу лише для task-aware сесії v2.
+ * Legacy v1 та відсутній контекст не активують спеціальні інструкції.
+ */
+
 export const conversationModeForLeadFlowContext = (
   context: LeadFlowSessionContext | undefined,
 ): ConversationMode | undefined =>
