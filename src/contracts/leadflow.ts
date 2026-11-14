@@ -1,6 +1,8 @@
 import { z } from "zod";
 
+// Приймає ISO-дату з явним часовим зміщенням, щоб інтеграції не залежали від локальної зони сервера.
 const isoTimestamp = z.string().datetime({ offset: true });
+// Перевіряє не лише формат YYYY-MM-DD, а й існування календарної дати після UTC-нормалізації.
 const dateOnly = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -8,7 +10,17 @@ const dateOnly = z
     const date = new Date(`${value}T00:00:00.000Z`);
     return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
   }, "Invalid calendar date");
+/**
+ * Створює Zod-схему непорожнього тексту з обрізанням пробілів і заданою максимальною довжиною.
+ * @param maximum — найбільша дозволена кількість символів.
+ * @returns Схему, яку повторно використовують поля контрактів LeadFlow.
+ */
 const boundedText = (maximum: number) => z.string().trim().min(1).max(maximum);
+/**
+ * Нормалізує null від зовнішнього API до undefined, щоб optional Zod-поля обробляли обидві форми відсутності.
+ * @param value — довільне вхідне значення.
+ * @returns undefined для null, інакше початкове значення без змін.
+ */
 const nullToUndefined = (value: unknown): unknown =>
   value === null ? undefined : value;
 
