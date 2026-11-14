@@ -400,6 +400,7 @@ export const leadFlowSuccessResponseSchema = z
 
 export type LeadFlowSuccessResponse = z.infer<typeof leadFlowSuccessResponseSchema>;
 
+// Нормалізує відсутній контактний текст до null і обмежує непорожнє значення 500 символами.
 const optionalContactText = z
   .string()
   .trim()
@@ -409,6 +410,7 @@ const optionalContactText = z
   .optional()
   .transform((value) => value ?? null);
 
+// Перевіряє необов'язковий email, обмежує стандартну довжину й також уніфікує відсутність як null.
 const optionalContactEmail = z
   .string()
   .trim()
@@ -439,6 +441,11 @@ export const leadFlowLeadSchema = z
   })
   .strict();
 
+/**
+ * Створює схему необов'язкового непорожнього тексту для полів call brief.
+ * @param maximum — межа довжини; типово 2000 символів.
+ * @returns Zod-схему з trim, мінімумом один символ і заданим максимумом.
+ */
 const optionalBriefText = (maximum = 2_000) =>
   z.string().trim().min(1).max(maximum).optional();
 
