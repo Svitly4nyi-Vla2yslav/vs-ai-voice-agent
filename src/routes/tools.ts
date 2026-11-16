@@ -24,6 +24,10 @@ type ToolsRouterOptions = {
   allowManualLeadId?: boolean | undefined;
 };
 
+/**
+ * Суворо перевіряє назву інструмента, довільні arguments і необов'язковий LeadFlow-контекст.
+ * Одночасне передавання підписаної сесії та developer lead id відхиляється.
+ */
 export const toolExecutionRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(100),
@@ -42,6 +46,11 @@ export const toolExecutionRequestSchema = z
   })
   .strict();
 
+/**
+ * Створює ізольований Express Router для статусу LeadFlow та виконання агентних інструментів.
+ * Необов'язкові залежності дозволяють тестам підмінити dispatcher і політику контексту;
+ * зовнішні дії можливі лише в POST-обробнику після same-origin та Zod-перевірок.
+ */
 export const createToolsRouter = (
   options: ToolsRouterOptions = {},
 ): Router => {
