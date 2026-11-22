@@ -9,9 +9,11 @@ export type PromptCacheTelemetry = PromptCacheUsage & {
 };
 
 /**
- * Обчислює частку cached tokens від загальної кількості input tokens.
- * Повертає `undefined`, якщо лічильники відсутні або inputTokens не додатний,
- * щоб телеметрія не містила некоректного ділення чи штучного нуля.
+ * Обчислює необмежену частку cached tokens від загальної кількості input tokens.
+ * @param inputTokens — загальна кількість вхідних токенів; має бути додатною.
+ * @param cachedTokens — кількість токенів, прочитаних із кешу.
+ * @returns Відношення `cachedTokens / inputTokens` без округлення або `undefined`, якщо лічильників бракує.
+ * Функція чиста й не змінює отримані значення.
  */
 export const cacheHitRate = (
   inputTokens: number | undefined,
@@ -25,7 +27,9 @@ export const cacheHitRate = (
 
 /**
  * Нормалізує доступні лічильники prompt cache в компактний об'єкт телеметрії.
- * Пропускає поля зі значенням `undefined` і додає hitRate лише коли його можна обчислити.
+ * @param usage — необов’язкові лічильники input, cache read і cache write.
+ * @returns Новий об’єкт без полів `undefined`; `hitRate` додається лише коли його можна обчислити.
+ * Функція не журналює дані й не змінює вхідний об’єкт.
  */
 export const promptCacheTelemetry = (
   usage: PromptCacheUsage,
